@@ -1,0 +1,17 @@
+project2_vision_ocr_dashboard/
+├─ data/
+│  ├─ source_structured/
+│  │  ├─ ground_truth_multimodal_240.csv
+│  │  ├─ ground_truth_multimodal_240.xlsx
+│  │  ├─ ground_truth_multimodal_240.jsonl
+│  │  ├─ ground_truth_schema.json
+│  │  └─ image_contact_sheet_preview.jpg
+│  ├─ input_images/
+│  │  ├─ receipts/    # 영수증 이미지 120장
+│  │  └─ surveys/     # 수기 설문지 이미지 120장
+│  ├─ ocr/            # Antigravity가 OCR 결과를 생성할 폴더
+│  └─ processed/      # Antigravity가 정제 결과를 생성할 폴더
+├─ app/               # Streamlit 대시보드 생성 위치
+├─ reports/           # 품질 리포트 생성 위치
+├─ prompts/
+└─ final_output/

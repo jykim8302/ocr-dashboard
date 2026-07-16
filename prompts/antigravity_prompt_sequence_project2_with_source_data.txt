@@ -1,0 +1,72 @@
+# Antigravity Project 2 - 제공 이미지/정형 데이터 기반 OCR 실습 프롬프트 순서
+
+이 파일의 프롬프트를 순서대로 Antigravity 2.0에 입력하세요. 코드를 직접 작성하지 않고, 에이전트가 파일을 읽고 필요한 코드를 생성하게 하는 방식입니다.
+
+[프롬프트 1] 프로젝트 폴더 구조 확인
+아래 폴더를 기준으로 Project 2 OCR 대시보드 실습 프로젝트를 준비해줘.
+- 현재 제공된 data/source_structured/ground_truth_multimodal_240.csv 파일은 OCR 정답 기준 데이터야.
+- data/input_images/receipts 폴더에는 영수증 이미지 120장이 있어.
+- data/input_images/surveys 폴더에는 수기 설문지 이미지 120장이 있어.
+- 내가 코드를 직접 수정하지 않도록 필요한 Python 파일과 실행 방법을 네가 생성하고 안내해줘.
+- 결과물은 data/ocr, data/processed, reports, app 폴더에 저장되게 해줘.
+
+[프롬프트 2] 원본 데이터와 이미지 매칭 검증
+CSV의 image_filename 컬럼을 기준으로 실제 이미지 파일이 모두 존재하는지 검사하는 스크립트를 만들어 실행해줘.
+검사 결과는 reports/data_image_validation_report.txt로 저장해줘.
+누락 이미지, 잘못된 확장자, 중복 record_id가 있으면 표로 알려줘.
+
+[프롬프트 3] OCR 추출기 생성
+data/input_images 폴더의 영수증과 설문지 이미지를 읽어서 OCR을 수행하는 스크립트를 만들어줘.
+가능하면 Antigravity Vision 기능 또는 사용 가능한 OCR 도구를 사용하고, 환경에서 실제 Vision API 호출이 어려우면 시뮬레이션 OCR 모드도 제공해줘.
+추출 결과는 data/ocr/ocr_extracted_raw.csv에 저장해줘.
+필수 컬럼은 record_id, document_type, image_filename, extracted_date, extracted_store_or_dept, extracted_amount, extracted_scores, extracted_note, confidence, error_message야.
+
+[프롬프트 4] 이미지 전처리 추가
+저해상도 또는 오염된 이미지도 읽을 수 있도록 OpenCV 기반 전처리 단계를 추가해줘.
+전처리에는 grayscale 변환, 대비 향상, threshold, 노이즈 제거를 포함해줘.
+전처리 이미지는 data/ocr/preprocessed_images 폴더에 저장하고, OCR 결과에는 preprocessing_used 컬럼을 추가해줘.
+
+[프롬프트 5] OCR 결과와 정답 데이터 비교
+OCR 결과 data/ocr/ocr_extracted_raw.csv와 정답 데이터 data/source_structured/ground_truth_multimodal_240.csv를 record_id 기준으로 비교해줘.
+문서 유형별 정확도, 금액 추출 정확도, 설문 점수 추출 정확도, 수기 메모 추출 성공률을 계산하고 reports/ocr_quality_report.xlsx와 reports/ocr_quality_summary.txt로 저장해줘.
+
+[프롬프트 6] 결측치 보간 및 정규화
+OCR 결과에서 누락된 금액, 날짜, 점수, 메모를 탐지하고, 결측치 처리 정책을 적용해줘.
+- 날짜 누락: 원본 정답 데이터와 매칭 가능하면 보완
+- 금액 누락: 영수증 문서만 원본 기준으로 보완하되 보완 여부 표시
+- 설문 점수 누락: 같은 부서와 유사 문서 평균으로 보간
+- 메모 누락: '확인필요'로 표시
+정제 결과는 data/processed/ocr_cleaned_dataset.xlsx로 저장해줘.
+
+[프롬프트 7] Streamlit 대시보드 생성
+data/processed/ocr_cleaned_dataset.xlsx를 사용해서 Streamlit 대시보드를 만들어줘.
+대시보드에는 다음을 포함해줘.
+1. 전체 문서 수, OCR 성공률, 결측치 보완 건수 KPI 카드
+2. 영수증 카테고리별 총 금액 도넛 차트
+3. 설문 부서별 평균 만족도 막대 차트
+4. 저해상도 이미지와 일반 이미지의 OCR 성공률 비교
+5. OCR 실패 또는 확인필요 목록 테이블
+app/vision_dashboard.py로 저장하고 실행 방법을 알려줘.
+
+[프롬프트 8] 디자인 변경
+대시보드 디자인을 임원 보고용 스타일로 바꿔줘.
+- 상단 제목은 '멀티모달 OCR 분석 대시보드'
+- KPI 카드는 4개를 가로 배치
+- 색상은 네이비, 화이트, 민트 계열로 정리
+- 표는 너무 길지 않게 필터를 제공
+- 사이드바에서 문서 유형과 부서를 선택할 수 있게 해줘.
+
+[프롬프트 9] 브라우저 검증
+Streamlit 앱을 실행하고 Antigravity 내장 브라우저로 화면을 확인해줘.
+차트가 깨지거나 스크롤이 과도하게 길거나 표가 화면 밖으로 나가면 자동으로 수정해줘.
+검증 결과를 reports/dashboard_visual_check.txt로 저장해줘.
+
+[프롬프트 10] 최종 산출물 정리
+프로젝트 결과물을 final_output 폴더에 정리해줘.
+포함할 파일은 다음과 같아.
+- 정제된 OCR 데이터 Excel
+- OCR 품질 리포트
+- 대시보드 실행 파일
+- 화면 검증 리포트
+- 실행 방법 README
+그리고 final_output 폴더를 ZIP으로 압축해줘.

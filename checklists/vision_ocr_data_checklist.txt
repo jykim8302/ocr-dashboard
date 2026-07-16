@@ -1,0 +1,12 @@
+# OCR 실습 데이터 확인 체크리스트
+
+1. data/source_structured/ground_truth_multimodal_240.csv 파일이 있는가?
+2. data/source_structured/ground_truth_multimodal_240.xlsx 파일이 있는가?
+3. data/input_images/receipts 이미지가 120장 있는가?
+4. data/input_images/surveys 이미지가 120장 있는가?
+5. CSV의 image_filename 경로와 실제 이미지 경로가 일치하는가?
+6. record_id가 중복되지 않는가?
+7. 일부 이미지에는 저해상도/오염 노이즈가 포함되어 OCR 예외 처리 실습이 가능한가?
+8. Antigravity가 data/ocr 폴더에 OCR 결과를 생성했는가?
+9. Antigravity가 data/processed 폴더에 정제 결과를 생성했는가?
+10. Streamlit 대시보드가 정상 실행되는가?

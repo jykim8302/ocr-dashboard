@@ -1,0 +1,241 @@
+﻿record_id,document_type,image_filename,extracted_date,extracted_store_or_dept,extracted_amount,extracted_scores,extracted_note,confidence,error_message,preprocessing_used
+R-0048,receipt,data/input_images/receipts/receipt_048_R-0048.jpg,2026-05-18,업무자동화카페,95150,,프로젝트 자료,0.9163,,True
+S-0052,survey,data/input_images/surveys/survey_052_S-0052.jpg,2026-03-11,기획팀,,"만족도:5, 편의성:5, 속도:1",데이터 보정 기능 좋음,0.9237,,True
+R-0055,receipt,data/input_images/receipts/receipt_055_R-0055.jpg,2026-03-19,업무자동화카페,91300,,대시보드 검토,0.8956,,True
+S-0044,survey,data/input_images/surveys/survey_044_S-0044.jpg,2026-06-09,데이터팀,,"만족도:2, 편의성:3, 속도:5",이미지 업로드 편리 (전처리완료),0.9433,,True
+R-0107,receipt,data/input_images/receipts/receipt_107_R-0107.jpg,2026-03-30,스마트오피스,89100,,실습 준비용,0.9057,,True
+R-0111,receipt,data/input_images/receipts/receipt_111_R-0111.jpg,2026-04-08,테크문구,140250,,대시보드 검토,0.9595,,True
+S-0033,survey,data/input_images/surveys/survey_033_S-0033.jpg,2026-07-09,교육팀,,"만족도:5, 편의성:5, 속도:3",보고서 자동화 유용,0.9361,,True
+R-0069,receipt,data/input_images/receipts/receipt_069_R-0069.jpg,2026-07-03,테크문구,191950,,현장 실습비,0.9462,,True
+R-0087,receipt,data/input_images/receipts/receipt_087_R-0087.jpg,2026-06-05,업무자동화카페,254650,,대시보드 검토,0.9469,,True
+R-0119,receipt,data/input_images/receipts/receipt_119_R-0119.jpg,2026-06-27,모두카페,80300,,프로젝트 자료,0.9415,,True
+S-0109,survey,data/input_images/surveys/survey_109_S-0109.jpg,2026-04-14,운영팀,,"만족도:4, 편의성:4, 속도:2",속도 개선 필요,0.9565,,True
+R-0005,receipt,data/input_images/receipts/receipt_005_R-0005.jpg,2026-05-14,모두카페,202950,,실습 준비용,0.9281,,True
+S-0117,survey,data/input_images/surveys/survey_117_S-0117.jpg,2026-03-12,재무팀,,"만족도:5, 편의성:5, 속도:3",데이터 보정 기능 좋음,0.9316,,True
+S-0020,survey,data/input_images/surveys/survey_020_S-0020.jpg,2026-04-16,인사팀,,"만족도:2, 편의성:2, 속도:1",입력 절차가 간단함,0.9742,,True
+R-0093,receipt,data/input_images/receipts/receipt_093_R-0093.jpg,2026-06-16,업무자동화카페,163900,,프로젝트 자료,0.9336,,True
+R-0105,receipt,data/input_images/receipts/receipt_105_R-0105.jpg,2026-04-28,모두카페,126500,,팀 회의 사용,0.9484,,True
+S-0096,survey,data/input_images/surveys/survey_096_S-0096.jpg,2026-03-19,재무팀,,"만족도:2, 편의성:2, 속도:4",입력 절차가 간단함,0.9155,,True
+S-0097,survey,data/input_images/surveys/survey_097_S-0097.jpg,2026-04-30,영업팀,,"만족도:4, 편의성:2, 속도:4",이미지 업로드 편리,0.8801,,True
+S-0115,survey,data/input_images/surveys/survey_115_S-0115.jpg,2026-05-10,데이터팀,,"만족도:5, 편의성:2, 속도:4",데이터 보정 기능 좋음,0.9489,,True
+R-0057,receipt,data/input_images/receipts/receipt_057_R-0057.jpg,2026-05-15,업무자동화카페,320100,,현장 실습비,0.9123,,True
+R-0056,receipt,data/input_images/receipts/receipt_056_R-0056.jpg,2026-04-12,데이터랩서점,64350,,현장 실습비,0.9085,,True
+R-0078,receipt,data/input_images/receipts/receipt_078_R-0078.jpg,2026-04-01,클라우드문구,206800,,프로젝트 자료,0.9412,,True
+S-0106,survey,data/input_images/surveys/survey_106_S-0106.jpg,2026-05-19,기획팀,,"만족도:5, 편의성:3, 속도:2",대시보드가 보기 쉬움,0.9323,,True
+R-0072,receipt,data/input_images/receipts/receipt_072_R-0072.jpg,2026-05-09,서울프린트,305250,,현장 실습비,0.9193,,True
+S-0064,survey,data/input_images/surveys/survey_064_S-0064.jpg,2026-04-06,운영팀,,"만족도:4, 편의성:3, 속도:5",메뉴 구성이 좋음,0.9569,,True
+R-0115,receipt,data/input_images/receipts/receipt_115_R-0115.jpg,2026-05-10,AI세미나센터,142450,,프로젝트 자료,0.9289,,True
+S-0013,survey,data/input_images/surveys/survey_013_S-0013.jpg,2026-05-20,재무팀,,"만족도:5, 편의성:5, 속도:3",보고서 자동화 유용,0.9072,,True
+R-0070,receipt,data/input_images/receipts/receipt_070_R-0070.jpg,2026-05-28,그린오피스,91300,,대시보드 검토,0.9385,,True
+R-0024,receipt,data/input_images/receipts/receipt_024_R-0024.jpg,2026-06-28,업무자동화카페,240350,,운영비 처리,0.8857,,True
+S-0037,survey,data/input_images/surveys/survey_037_S-0037.jpg,2026-05-31,교육팀,,"만족도:3, 편의성:4, 속도:3",속도 개선 필요,0.8916,,True
+R-0052,receipt,data/input_images/receipts/receipt_052_R-0052.jpg,2026-03-03,서울프린트,135300,,실습 준비용,0.9437,,True
+R-0011,receipt,data/input_images/receipts/receipt_011_R-0011.jpg,2026-04-01,모두카페,167750,,프로젝트 자료,0.9494,,True
+R-0053,receipt,data/input_images/receipts/receipt_053_R-0053.jpg,2026-05-24,서울프린트,150700,,프로젝트 자료,0.9608,,True
+R-0026,receipt,data/input_images/receipts/receipt_026_R-0026.jpg,2026-03-29,스마트오피스,183700,,OCR 테스트용,0.9593,,True
+S-0092,survey,data/input_images/surveys/survey_092_S-0092.jpg,2026-06-17,마케팅팀,,"만족도:2, 편의성:2, 속도:3",보고서 자동화 유용,0.9187,,True
+R-0062,receipt,data/input_images/receipts/receipt_062_R-0062.jpg,2026-05-22,데이터랩서점,77000,,프로젝트 자료,0.9568,,True
+R-0010,receipt,data/input_images/receipts/receipt_010_R-0010.jpg,2026-05-08,데이터랩서점,152900,,OCR 테스트용,0.9583,,True
+R-0117,receipt,data/input_images/receipts/receipt_117_R-0117.jpg,2026-06-29,스마트오피스,220550,,현장 실습비,0.9116,,True
+S-0027,survey,data/input_images/surveys/survey_027_S-0027.jpg,2026-04-13,마케팅팀,,"만족도:4, 편의성:5, 속도:5",데이터 보정 기능 좋음,0.9547,,True
+S-0104,survey,data/input_images/surveys/survey_104_S-0104.jpg,2026-04-26,마케팅팀,,"만족도:5, 편의성:2, 속도:5",데이터 보정 기능 좋음,0.9107,,True
+S-0045,survey,data/input_images/surveys/survey_045_S-0045.jpg,2026-06-25,데이터팀,,"만족도:3, 편의성:5, 속도:3",모바일 화면 개선,0.9117,,True
+R-0106,receipt,data/input_images/receipts/receipt_106_R-0106.jpg,2026-06-25,AI세미나센터,86350,,현장 실습비,0.9323,,True
+R-0044,receipt,data/input_images/receipts/receipt_044_R-0044.jpg,2026-06-02,모두카페,224950,,실습 준비용,0.9633,,True
+S-0062,survey,data/input_images/surveys/survey_062_S-0062.jpg,2026-05-22,교육팀,,"만족도:5, 편의성:2, 속도:5",메뉴 구성이 좋음,0.9768,,True
+R-0086,receipt,data/input_images/receipts/receipt_086_R-0086.jpg,2026-03-17,업무자동화카페,180400,,OCR 테스트용,0.9752,,True
+R-0027,receipt,data/input_images/receipts/receipt_027_R-0027.jpg,2026-04-01,데이터랩서점,85250,,교육자료 준비,0.9547,,True
+S-0099,survey,data/input_images/surveys/survey_099_S-0099.jpg,2026-05-21,운영팀,,"만족도:3, 편의성:2, 속도:5",차트 설명이 필요함,0.9414,,True
+R-0058,receipt,data/input_images/receipts/receipt_058_R-0058.jpg,2026-03-31,데이터랩서점,68750,,팀 회의 사용,0.8917,,True
+R-0112,receipt,data/input_images/receipts/receipt_112_R-0112.jpg,2026-04-28,디지털스캔샵,206250,,교육자료 준비,0.9163,,True
+S-0095,survey,data/input_images/surveys/survey_095_S-0095.jpg,2026-04-09,운영팀,,"만족도:2, 편의성:5, 속도:1",속도 개선 필요,0.8858,,True
+S-0036,survey,data/input_images/surveys/survey_036_S-0036.jpg,2026-05-20,기획팀,,"만족도:4, 편의성:4, 속도:1",차트 설명이 필요함,0.9652,,True
+S-0024,survey,data/input_images/surveys/survey_024_S-0024.jpg,2026-05-18,교육팀,,"만족도:5, 편의성:4, 속도:2",데이터 보정 기능 좋음,0.8857,,True
+R-0063,receipt,data/input_images/receipts/receipt_063_R-0063.jpg,2026-07-07,서울프린트,165550,,현장 실습비,0.9502,,True
+R-0101,receipt,data/input_images/receipts/receipt_101_R-0101.jpg,2026-03-06,테크문구,128150,,현장 실습비,0.9525,,True
+S-0111,survey,data/input_images/surveys/survey_111_S-0111.jpg,2026-05-28,교육팀,,"만족도:5, 편의성:3, 속도:5",이미지 업로드 편리,0.9595,,True
+R-0066,receipt,data/input_images/receipts/receipt_066_R-0066.jpg,2026-04-24,스마트오피스,125400,,OCR 테스트용,0.8904,,True
+S-0082,survey,data/input_images/surveys/survey_082_S-0082.jpg,2026-04-20,운영팀,,"만족도:5, 편의성:4, 속도:3",모바일 화면 개선,0.9769,,True
+R-0097,receipt,data/input_images/receipts/receipt_097_R-0097.jpg,2026-04-25,클라우드문구,146850,,실습 준비용,0.8801,,True
+S-0057,survey,data/input_images/surveys/survey_057_S-0057.jpg,2026-06-23,재무팀,,"만족도:3, 편의성:2, 속도:3",대시보드가 보기 쉬움,0.9123,,True
+R-0041,receipt,data/input_images/receipts/receipt_041_R-0041.jpg,2026-05-06,스마트오피스,149050,,OCR 테스트용,0.9397,,True
+S-0056,survey,data/input_images/surveys/survey_056_S-0056.jpg,2026-06-24,교육팀,,"만족도:4, 편의성:4, 속도:2",속도 개선 필요,0.9085,,True
+R-0098,receipt,data/input_images/receipts/receipt_098_R-0098.jpg,2026-06-16,그린오피스,92400,,실습 준비용,0.9617,,True
+S-0086,survey,data/input_images/surveys/survey_086_S-0086.jpg,2026-04-22,재무팀,,"만족도:2, 편의성:5, 속도:4",OCR 결과 확인 필요,0.9552,,True
+S-0040,survey,data/input_images/surveys/survey_040_S-0040.jpg,2026-05-07,운영팀,,"만족도:3, 편의성:5, 속도:5",데이터 보정 기능 좋음,0.9116,,True
+S-0053,survey,data/input_images/surveys/survey_053_S-0053.jpg,2026-04-26,기획팀,,"만족도:5, 편의성:3, 속도:5",보고서 자동화 유용,0.9408,,True
+R-0079,receipt,data/input_images/receipts/receipt_079_R-0079.jpg,2026-06-12,스마트오피스,140250,,운영비 처리,0.887,,True
+S-0060,survey,data/input_images/surveys/survey_060_S-0060.jpg,2026-05-11,데이터팀,,"만족도:3, 편의성:3, 속도:5",이미지 업로드 편리,0.9119,,True
+R-0090,receipt,data/input_images/receipts/receipt_090_R-0090.jpg,2026-03-22,업무자동화카페,187000,,교육자료 준비,0.933,,True
+R-0051,receipt,data/input_images/receipts/receipt_051_R-0051.jpg,2026-03-22,스마트오피스,128700,,실습 준비용,0.973,,True
+S-0055,survey,data/input_images/surveys/survey_055_S-0055.jpg,2026-07-09,기획팀,,"만족도:3, 편의성:2, 속도:5",속도 개선 필요,0.9156,,True
+S-0080,survey,data/input_images/surveys/survey_080_S-0080.jpg,2026-05-10,데이터팀,,"만족도:2, 편의성:3, 속도:3",대시보드가 보기 쉬움,0.9408,,True
+S-0110,survey,data/input_images/surveys/survey_110_S-0110.jpg,2026-03-06,데이터팀,,"만족도:5, 편의성:3, 속도:3",입력 절차가 간단함,0.9782,,True
+R-0014,receipt,data/input_images/receipts/receipt_014_R-0014.jpg,2026-03-14,디지털스캔샵,147400,,실습 준비용,0.9773,,True
+R-0032,receipt,data/input_images/receipts/receipt_032_R-0032.jpg,2026-05-24,그린오피스,315150,,OCR 테스트용,0.9688,,True
+S-0001,survey,data/input_images/surveys/survey_001_S-0001.jpg,2026-03-10,영업팀,,"만족도:3, 편의성:5, 속도:1",이미지 업로드 편리,0.9031,,True
+S-0002,survey,data/input_images/surveys/survey_002_S-0002.jpg,2026-06-29,인사팀,,"만족도:4, 편의성:5, 속도:4",대시보드가 보기 쉬움,0.9327,,True
+S-0108,survey,data/input_images/surveys/survey_108_S-0108.jpg,2026-05-25,재무팀,,"만족도:5, 편의성:2, 속도:3",차트 설명이 필요함,0.9459,,True
+R-0092,receipt,data/input_images/receipts/receipt_092_R-0092.jpg,2026-05-09,데이터랩서점,281050,,팀 회의 사용,0.9387,,True
+R-0083,receipt,data/input_images/receipts/receipt_083_R-0083.jpg,2026-03-04,AI세미나센터,230450,,팀 회의 사용,0.972,,True
+R-0110,receipt,data/input_images/receipts/receipt_110_R-0110.jpg,2026-06-21,스마트오피스,48950,,팀 회의 사용,0.9582,,True
+R-0065,receipt,data/input_images/receipts/receipt_065_R-0065.jpg,2026-03-14,테크문구,334400,,실습 준비용,0.8997,,True
+S-0090,survey,data/input_images/surveys/survey_090_S-0090.jpg,2026-06-16,재무팀,,"만족도:4, 편의성:3, 속도:4",모바일 화면 개선,0.933,,True
+R-0017,receipt,data/input_images/receipts/receipt_017_R-0017.jpg,2026-05-04,서울프린트,111650,,교육자료 준비,0.9179,,True
+S-0019,survey,data/input_images/surveys/survey_019_S-0019.jpg,2026-04-24,재무팀,,"만족도:4, 편의성:5, 속도:2",이미지 업로드 편리,0.9196,,True
+S-0039,survey,data/input_images/surveys/survey_039_S-0039.jpg,2026-06-09,재무팀,,"만족도:2, 편의성:5, 속도:2",모바일 화면 개선,0.9205,,True
+S-0102,survey,data/input_images/surveys/survey_102_S-0102.jpg,2026-05-11,데이터팀,,"만족도:4, 편의성:5, 속도:5",OCR 결과 확인 필요,0.9159,,True
+R-0031,receipt,data/input_images/receipts/receipt_031_R-0031.jpg,2026-04-25,모두카페,19800,,대시보드 검토,0.9224,,True
+R-0036,receipt,data/input_images/receipts/receipt_036_R-0036.jpg,2026-04-19,클라우드문구,147400,,대시보드 검토,0.9652,,True
+R-0082,receipt,data/input_images/receipts/receipt_082_R-0082.jpg,2026-05-27,클라우드문구,188100,,현장 실습비,0.9769,,True
+R-0015,receipt,data/input_images/receipts/receipt_015_R-0015.jpg,2026-03-16,클라우드문구,243100,,교육자료 준비,0.8834,,True
+R-0113,receipt,data/input_images/receipts/receipt_113_R-0113.jpg,2026-05-25,스마트오피스,146300,,프로젝트 자료,0.9465,,True
+S-0015,survey,data/input_images/surveys/survey_015_S-0015.jpg,2026-04-27,인사팀,,"만족도:3, 편의성:5, 속도:3",입력 절차가 간단함,0.8834,,True
+S-0050,survey,data/input_images/surveys/survey_050_S-0050.jpg,2026-04-28,데이터팀,,"만족도:2, 편의성:2, 속도:2",이미지 업로드 편리,0.9137,,True
+S-0029,survey,data/input_images/surveys/survey_029_S-0029.jpg,2026-05-23,영업팀,,"만족도:4, 편의성:3, 속도:3",보고서 자동화 유용,0.9059,,True
+S-0070,survey,data/input_images/surveys/survey_070_S-0070.jpg,2026-06-21,인사팀,,"만족도:5, 편의성:4, 속도:3",보고서 자동화 유용,0.9385,,True
+S-0021,survey,data/input_images/surveys/survey_021_S-0021.jpg,2026-05-10,마케팅팀,,"만족도:4, 편의성:3, 속도:1",데이터 보정 기능 좋음,0.9356,,True
+R-0080,receipt,data/input_images/receipts/receipt_080_R-0080.jpg,2026-04-22,그린오피스,91300,,교육자료 준비,0.9408,,True
+S-0038,survey,data/input_images/surveys/survey_038_S-0038.jpg,2026-04-20,영업팀,,"만족도:4, 편의성:2, 속도:5",입력 절차가 간단함,0.9217,,True
+R-0029,receipt,data/input_images/receipts/receipt_029_R-0029.jpg,2026-05-18,데이터랩서점,183150,,실습 준비용,0.9259,,True
+R-0054,receipt,data/input_images/receipts/receipt_054_R-0054.jpg,2026-06-15,스마트오피스,160050,,현장 실습비,0.9296,,True
+R-0002,receipt,data/input_images/receipts/receipt_002_R-0002.jpg,2026-07-02,스마트오피스,193600,,실습 준비용,0.9127,,True
+R-0034,receipt,data/input_images/receipts/receipt_034_R-0034.jpg,2026-04-13,스마트오피스,255750,,실습 준비용,0.9296,,True
+R-0020,receipt,data/input_images/receipts/receipt_020_R-0020.jpg,2026-05-10,그린오피스,117150,,팀 회의 사용,0.9742,,True
+R-0040,receipt,data/input_images/receipts/receipt_040_R-0040.jpg,2026-04-24,서울프린트,123200,,실습 준비용,0.9116,,True
+R-0037,receipt,data/input_images/receipts/receipt_037_R-0037.jpg,2026-04-03,그린오피스,94050,,현장 실습비,0.9116,,True
+R-0008,receipt,data/input_images/receipts/receipt_008_R-0008.jpg,2026-04-09,스마트오피스,195250,,운영비 처리,0.9398,,True
+R-0033,receipt,data/input_images/receipts/receipt_033_R-0033.jpg,2026-04-19,테크문구,97900,,대시보드 검토,0.9361,,True
+R-0102,receipt,data/input_images/receipts/receipt_102_R-0102.jpg,2026-03-01,서울프린트,193050,,현장 실습비,0.9359,,True
+S-0118,survey,data/input_images/surveys/survey_118_S-0118.jpg,2026-04-09,영업팀,,"만족도:5, 편의성:2, 속도:3",모바일 화면 개선,0.9098,,True
+R-0023,receipt,data/input_images/receipts/receipt_023_R-0023.jpg,2026-04-30,디지털스캔샵,153450,,실습 준비용,0.9132,,True
+R-0039,receipt,data/input_images/receipts/receipt_039_R-0039.jpg,2026-04-10,데이터랩서점,161700,,교육자료 준비,0.9405,,True
+S-0034,survey,data/input_images/surveys/survey_034_S-0034.jpg,2026-04-29,데이터팀,,"만족도:3, 편의성:4, 속도:4",대시보드가 보기 쉬움,0.9296,,True
+R-0028,receipt,data/input_images/receipts/receipt_028_R-0028.jpg,2026-05-12,모두카페,200200,,현장 실습비,0.9728,,True
+R-0059,receipt,data/input_images/receipts/receipt_059_R-0059.jpg,2026-07-05,업무자동화카페,94050,,OCR 테스트용,0.9465,,True
+R-0120,receipt,data/input_images/receipts/receipt_120_R-0120.jpg,2026-07-03,데이터랩서점,274450,,프로젝트 자료,0.9043,,True
+S-0098,survey,data/input_images/surveys/survey_098_S-0098.jpg,2026-04-20,운영팀,,"만족도:5, 편의성:3, 속도:2",대시보드가 보기 쉬움,0.9617,,True
+S-0100,survey,data/input_images/surveys/survey_100_S-0100.jpg,2026-03-27,기획팀,,"만족도:3, 편의성:3, 속도:5",보고서 자동화 유용,0.9466,,True
+S-0030,survey,data/input_images/surveys/survey_030_S-0030.jpg,2026-05-19,인사팀,,"만족도:5, 편의성:2, 속도:1",OCR 결과 확인 필요,0.8859,,True
+R-0114,receipt,data/input_images/receipts/receipt_114_R-0114.jpg,2026-04-21,업무자동화카페,171600,,실습 준비용,0.939,,True
+S-0066,survey,data/input_images/surveys/survey_066_S-0066.jpg,2026-05-29,인사팀,,"만족도:4, 편의성:3, 속도:1",속도 개선 필요,0.9104,,True
+S-0032,survey,data/input_images/surveys/survey_032_S-0032.jpg,2026-04-03,교육팀,,"만족도:4, 편의성:3, 속도:3",입력 절차가 간단함,0.9688,,True
+S-0022,survey,data/input_images/surveys/survey_022_S-0022.jpg,2026-06-17,운영팀,,"만족도:2, 편의성:2, 속도:4",메뉴 구성이 좋음,0.9181,,True
+S-0074,survey,data/input_images/surveys/survey_074_S-0074.jpg,2026-03-26,운영팀,,"만족도:3, 편의성:4, 속도:5",속도 개선 필요,0.9457,,True
+S-0058,survey,data/input_images/surveys/survey_058_S-0058.jpg,2026-05-25,인사팀,,"만족도:3, 편의성:5, 속도:1",속도 개선 필요,0.8917,,True
+R-0118,receipt,data/input_images/receipts/receipt_118_R-0118.jpg,2026-05-31,클라우드문구,93500,,팀 회의 사용,0.8898,,True
+R-0007,receipt,data/input_images/receipts/receipt_007_R-0007.jpg,2026-05-24,데이터랩서점,119350,,프로젝트 자료,0.9054,,True
+S-0083,survey,data/input_images/surveys/survey_083_S-0083.jpg,2026-05-27,운영팀,,"만족도:5, 편의성:3, 속도:2",속도 개선 필요,0.972,,True
+S-0072,survey,data/input_images/surveys/survey_072_S-0072.jpg,2026-03-13,영업팀,,"만족도:5, 편의성:4, 속도:4",데이터 보정 기능 좋음,0.9193,,True
+R-0006,receipt,data/input_images/receipts/receipt_006_R-0006.jpg,2026-06-27,업무자동화카페,127050,,교육자료 준비,0.9439,,True
+S-0120,survey,data/input_images/surveys/survey_120_S-0120.jpg,2026-05-19,인사팀,,"만족도:2, 편의성:3, 속도:3",모바일 화면 개선,0.9043,,True
+S-0067,survey,data/input_images/surveys/survey_067_S-0067.jpg,2026-07-02,마케팅팀,,"만족도:5, 편의성:4, 속도:5",메뉴 구성이 좋음,0.9024,,True
+R-0077,receipt,data/input_images/receipts/receipt_077_R-0077.jpg,2026-04-04,업무자동화카페,63800,,프로젝트 자료,0.9741,,True
+R-0021,receipt,data/input_images/receipts/receipt_021_R-0021.jpg,2026-04-04,데이터랩서점,20350,,대시보드 검토,0.9356,,True
+S-0023,survey,data/input_images/surveys/survey_023_S-0023.jpg,2026-05-23,기획팀,,"만족도:3, 편의성:2, 속도:5",보고서 자동화 유용,0.9132,,True
+S-0059,survey,data/input_images/surveys/survey_059_S-0059.jpg,2026-04-19,인사팀,,"만족도:3, 편의성:4, 속도:1",OCR 결과 확인 필요,0.9465,,True
+S-0010,survey,data/input_images/surveys/survey_010_S-0010.jpg,2026-03-12,운영팀,,"만족도:5, 편의성:3, 속도:4",속도 개선 필요,0.9783,,True
+S-0025,survey,data/input_images/surveys/survey_025_S-0025.jpg,2026-06-27,재무팀,,"만족도:2, 편의성:4, 속도:2",차트 설명이 필요함,0.906,,True
+S-0087,survey,data/input_images/surveys/survey_087_S-0087.jpg,2026-03-29,데이터팀,,"만족도:5, 편의성:2, 속도:2",차트 설명이 필요함,0.9469,,True
+S-0112,survey,data/input_images/surveys/survey_112_S-0112.jpg,2026-06-28,기획팀,,"만족도:5, 편의성:2, 속도:3",속도 개선 필요,0.9163,,True
+R-0004,receipt,data/input_images/receipts/receipt_004_R-0004.jpg,2026-06-14,서울프린트,206250,,팀 회의 사용,0.9511,,True
+S-0084,survey,data/input_images/surveys/survey_084_S-0084.jpg,2026-03-24,재무팀,,"만족도:4, 편의성:3, 속도:5",데이터 보정 기능 좋음,0.9258,,True
+R-0043,receipt,data/input_images/receipts/receipt_043_R-0043.jpg,2026-04-29,테크문구,166650,,운영비 처리,0.896,,True
+R-0075,receipt,data/input_images/receipts/receipt_075_R-0075.jpg,2026-05-09,서울프린트,112750,,팀 회의 사용,0.8992,,True
+S-0042,survey,data/input_images/surveys/survey_042_S-0042.jpg,2026-05-10,데이터팀,,"만족도:3, 편의성:5, 속도:4",보고서 자동화 유용,0.9585,,True
+R-0013,receipt,data/input_images/receipts/receipt_013_R-0013.jpg,2026-05-24,클라우드문구,126500,,실습 준비용,0.9072,,True
+S-0071,survey,data/input_images/surveys/survey_071_S-0071.jpg,2026-07-05,데이터팀,,"만족도:5, 편의성:2, 속도:2",데이터 보정 기능 좋음,0.8824,,True
+S-0114,survey,data/input_images/surveys/survey_114_S-0114.jpg,2026-03-21,운영팀,,"만족도:4, 편의성:3, 속도:4",속도 개선 필요,0.939,,True
+S-0049,survey,data/input_images/surveys/survey_049_S-0049.jpg,2026-06-26,교육팀,,"만족도:5, 편의성:4, 속도:1",차트 설명이 필요함,0.9067,,True
+R-0049,receipt,data/input_images/receipts/receipt_049_R-0049.jpg,2026-03-28,테크문구,115500,,OCR 테스트용,0.9067,,True
+S-0076,survey,data/input_images/surveys/survey_076_S-0076.jpg,2026-05-06,인사팀,,"만족도:5, 편의성:5, 속도:3",메뉴 구성이 좋음,0.9569,,True
+R-0095,receipt,data/input_images/receipts/receipt_095_R-0095.jpg,2026-03-08,스마트오피스,125950,,운영비 처리,0.9058,,True
+R-0016,receipt,data/input_images/receipts/receipt_016_R-0016.jpg,2026-07-05,모두카페,79750,,OCR 테스트용,0.9465,,True
+S-0006,survey,data/input_images/surveys/survey_006_S-0006.jpg,2026-06-09,인사팀,,"만족도:3, 편의성:5, 속도:5",보고서 자동화 유용,0.9239,,True
+R-0061,receipt,data/input_images/receipts/receipt_061_R-0061.jpg,2026-06-04,데이터랩서점,255200,,운영비 처리,0.9783,,True
+R-0035,receipt,data/input_images/receipts/receipt_035_R-0035.jpg,2026-04-12,클라우드문구,132000,,운영비 처리,0.9639,,True
+S-0085,survey,data/input_images/surveys/survey_085_S-0085.jpg,2026-05-24,재무팀,,"만족도:3, 편의성:3, 속도:1",속도 개선 필요,0.8836,,True
+R-0084,receipt,data/input_images/receipts/receipt_084_R-0084.jpg,2026-05-26,서울프린트,134200,,팀 회의 사용,0.9458,,True
+S-0103,survey,data/input_images/surveys/survey_103_S-0103.jpg,2026-05-31,인사팀,,"만족도:5, 편의성:5, 속도:3",OCR 결과 확인 필요,0.9696,,True
+S-0065,survey,data/input_images/surveys/survey_065_S-0065.jpg,2026-06-05,교육팀,,"만족도:2, 편의성:3, 속도:2",차트 설명이 필요함,0.8997,,True
+S-0073,survey,data/input_images/surveys/survey_073_S-0073.jpg,2026-06-08,마케팅팀,,"만족도:4, 편의성:3, 속도:2",대시보드가 보기 쉬움,0.9717,,True
+S-0014,survey,data/input_images/surveys/survey_014_S-0014.jpg,2026-04-24,데이터팀,,"만족도:5, 편의성:2, 속도:3",OCR 결과 확인 필요,0.9773,,True
+S-0048,survey,data/input_images/surveys/survey_048_S-0048.jpg,2026-06-26,기획팀,,"만족도:5, 편의성:5, 속도:1",입력 절차가 간단함,0.9163,,True
+R-0085,receipt,data/input_images/receipts/receipt_085_R-0085.jpg,2026-07-01,스마트오피스,219450,,실습 준비용,0.9036,,True
+R-0001,receipt,data/input_images/receipts/receipt_001_R-0001.jpg,2026-05-10,모두카페,114950,,현장 실습비,0.8831,,True
+R-0096,receipt,data/input_images/receipts/receipt_096_R-0096.jpg,2026-04-14,테크문구,137500,,OCR 테스트용,0.9155,,True
+R-0100,receipt,data/input_images/receipts/receipt_100_R-0100.jpg,2026-04-20,클라우드문구,83050,,운영비 처리,0.9266,,True
+S-0077,survey,data/input_images/surveys/survey_077_S-0077.jpg,2026-05-08,운영팀,,"만족도:4, 편의성:5, 속도:1",메뉴 구성이 좋음,0.9741,,True
+S-0079,survey,data/input_images/surveys/survey_079_S-0079.jpg,2026-06-28,교육팀,,"만족도:2, 편의성:3, 속도:3",차트 설명이 필요함,0.907,,True
+R-0047,receipt,data/input_images/receipts/receipt_047_R-0047.jpg,2026-06-03,데이터랩서점,73150,,교육자료 준비,0.8865,,True
+R-0009,receipt,data/input_images/receipts/receipt_009_R-0009.jpg,2026-03-04,데이터랩서점,180950,,대시보드 검토,0.9195,,True
+R-0038,receipt,data/input_images/receipts/receipt_038_R-0038.jpg,2026-04-01,데이터랩서점,123750,,프로젝트 자료,0.9217,,True
+S-0035,survey,data/input_images/surveys/survey_035_S-0035.jpg,2026-05-06,운영팀,,"만족도:2, 편의성:5, 속도:1",차트 설명이 필요함,0.9639,,True
+R-0076,receipt,data/input_images/receipts/receipt_076_R-0076.jpg,2026-04-15,업무자동화카페,122100,,교육자료 준비,0.9569,,True
+S-0075,survey,data/input_images/surveys/survey_075_S-0075.jpg,2026-05-12,운영팀,,"만족도:5, 편의성:2, 속도:3",대시보드가 보기 쉬움,0.9192,,True
+R-0003,receipt,data/input_images/receipts/receipt_003_R-0003.jpg,2026-04-28,클라우드문구,43450,,교육자료 준비,0.9218,,True
+S-0026,survey,data/input_images/surveys/survey_026_S-0026.jpg,2026-03-27,재무팀,,"만족도:4, 편의성:5, 속도:1",모바일 화면 개선,0.9593,,True
+R-0074,receipt,data/input_images/receipts/receipt_074_R-0074.jpg,2026-04-02,테크문구,150150,,현장 실습비,0.9457,,True
+R-0067,receipt,data/input_images/receipts/receipt_067_R-0067.jpg,2026-05-02,서울프린트,145200,,대시보드 검토,0.9224,,True
+R-0018,receipt,data/input_images/receipts/receipt_018_R-0018.jpg,2026-04-25,스마트오피스,183700,,현장 실습비,0.9046,,True
+S-0081,survey,data/input_images/surveys/survey_081_S-0081.jpg,2026-06-26,재무팀,,"만족도:4, 편의성:3, 속도:4",속도 개선 필요,0.8842,,True
+S-0061,survey,data/input_images/surveys/survey_061_S-0061.jpg,2026-04-07,마케팅팀,,"만족도:5, 편의성:5, 속도:4",속도 개선 필요,0.9783,,True
+R-0046,receipt,data/input_images/receipts/receipt_046_R-0046.jpg,2026-05-13,디지털스캔샵,162250,,OCR 테스트용,0.9318,,True
+R-0030,receipt,data/input_images/receipts/receipt_030_R-0030.jpg,2026-06-25,디지털스캔샵,194700,,대시보드 검토,0.9059,,True
+S-0093,survey,data/input_images/surveys/survey_093_S-0093.jpg,2026-04-29,재무팀,,"만족도:3, 편의성:2, 속도:3",이미지 업로드 편리,0.9536,,True
+S-0016,survey,data/input_images/surveys/survey_016_S-0016.jpg,2026-04-07,데이터팀,,"만족도:2, 편의성:3, 속도:5",입력 절차가 간단함,0.9465,,True
+S-0005,survey,data/input_images/surveys/survey_005_S-0005.jpg,2026-05-19,운영팀,,"만족도:3, 편의성:5, 속도:5",속도 개선 필요,0.9281,,True
+R-0012,receipt,data/input_images/receipts/receipt_012_R-0012.jpg,2026-03-17,디지털스캔샵,147950,,운영비 처리,0.9731,,True
+S-0051,survey,data/input_images/surveys/survey_051_S-0051.jpg,2026-06-01,교육팀,,"만족도:5, 편의성:4, 속도:1",이미지 업로드 편리,0.953,,True
+S-0003,survey,data/input_images/surveys/survey_003_S-0003.jpg,2026-03-20,마케팅팀,,"만족도:5, 편의성:2, 속도:4",모바일 화면 개선,0.9218,,True
+R-0019,receipt,data/input_images/receipts/receipt_019_R-0019.jpg,2026-05-15,테크문구,38500,,팀 회의 사용,0.9396,,True
+S-0028,survey,data/input_images/surveys/survey_028_S-0028.jpg,2026-05-21,기획팀,,"만족도:3, 편의성:2, 속도:2",입력 절차가 간단함,0.9728,,True
+R-0025,receipt,data/input_images/receipts/receipt_025_R-0025.jpg,2026-05-03,AI세미나센터,207350,,프로젝트 자료,0.906,,True
+S-0069,survey,data/input_images/surveys/survey_069_S-0069.jpg,2026-05-26,교육팀,,"만족도:4, 편의성:4, 속도:2",메뉴 구성이 좋음,0.9462,,True
+S-0063,survey,data/input_images/surveys/survey_063_S-0063.jpg,2026-04-10,운영팀,,"만족도:5, 편의성:4, 속도:4",차트 설명이 필요함,0.9502,,True
+S-0101,survey,data/input_images/surveys/survey_101_S-0101.jpg,2026-05-28,재무팀,,"만족도:5, 편의성:2, 속도:5",이미지 업로드 편리,0.9525,,True
+R-0104,receipt,data/input_images/receipts/receipt_104_R-0104.jpg,2026-04-16,스마트오피스,271700,,교육자료 준비,0.9107,,True
+S-0091,survey,data/input_images/surveys/survey_091_S-0091.jpg,2026-06-11,마케팅팀,,"만족도:5, 편의성:2, 속도:4",보고서 자동화 유용,0.9395,,True
+R-0116,receipt,data/input_images/receipts/receipt_116_R-0116.jpg,2026-03-02,디지털스캔샵,174350,,교육자료 준비,0.9347,,True
+R-0088,receipt,data/input_images/receipts/receipt_088_R-0088.jpg,2026-05-28,테크문구,183150,,교육자료 준비,0.9416,,True
+S-0041,survey,data/input_images/surveys/survey_041_S-0041.jpg,2026-03-22,기획팀,,"만족도:5, 편의성:3, 속도:1",메뉴 구성이 좋음,0.9397,,True
+R-0071,receipt,data/input_images/receipts/receipt_071_R-0071.jpg,2026-06-24,테크문구,211200,,팀 회의 사용,0.8824,,True
+R-0022,receipt,data/input_images/receipts/receipt_022_R-0022.jpg,2026-05-18,AI세미나센터,161150,,운영비 처리,0.9381,,True
+S-0017,survey,data/input_images/surveys/survey_017_S-0017.jpg,2026-03-06,기획팀,,"만족도:3, 편의성:2, 속도:5",차트 설명이 필요함,0.8979,,True
+R-0050,receipt,data/input_images/receipts/receipt_050_R-0050.jpg,2026-03-29,데이터랩서점,189750,,대시보드 검토,0.9337,,True
+S-0004,survey,data/input_images/surveys/survey_004_S-0004.jpg,2026-06-07,영업팀,,"만족도:3, 편의성:5, 속도:4",데이터 보정 기능 좋음,0.9711,,True
+S-0116,survey,data/input_images/surveys/survey_116_S-0116.jpg,2026-06-16,운영팀,,"만족도:2, 편의성:4, 속도:1",OCR 결과 확인 필요,0.9347,,True
+R-0042,receipt,data/input_images/receipts/receipt_042_R-0042.jpg,2026-06-13,테크문구,168850,,교육자료 준비,0.9585,,True
+S-0119,survey,data/input_images/surveys/survey_119_S-0119.jpg,2026-07-09,마케팅팀,,"만족도:2, 편의성:5, 속도:2",대시보드가 보기 쉬움,0.9415,,True
+R-0091,receipt,data/input_images/receipts/receipt_091_R-0091.jpg,2026-05-17,서울프린트,121000,,교육자료 준비,0.9195,,True
+R-0108,receipt,data/input_images/receipts/receipt_108_R-0108.jpg,2026-06-09,디지털스캔샵,253000,,실습 준비용,0.9459,,True
+S-0094,survey,data/input_images/surveys/survey_094_S-0094.jpg,2026-07-02,운영팀,,"만족도:4, 편의성:5, 속도:4",대시보드가 보기 쉬움,0.9461,,True
+S-0012,survey,data/input_images/surveys/survey_012_S-0012.jpg,2026-05-12,재무팀,,"만족도:2, 편의성:2, 속도:1",이미지 업로드 편리,0.9731,,True
+R-0045,receipt,data/input_images/receipts/receipt_045_R-0045.jpg,2026-05-30,모두카페,229900,,교육자료 준비,0.8917,,True
+S-0018,survey,data/input_images/surveys/survey_018_S-0018.jpg,2026-07-07,인사팀,,"만족도:4, 편의성:5, 속도:5",차트 설명이 필요함,0.9246,,True
+S-0043,survey,data/input_images/surveys/survey_043_S-0043.jpg,2026-03-20,교육팀,,"만족도:2, 편의성:4, 속도:3",이미지 업로드 편리,0.896,,True
+R-0089,receipt,data/input_images/receipts/receipt_089_R-0089.jpg,2026-03-02,그린오피스,228800,,실습 준비용,0.9252,,True
+S-0054,survey,data/input_images/surveys/survey_054_S-0054.jpg,2026-04-30,마케팅팀,,"만족도:2, 편의성:3, 속도:2",데이터 보정 기능 좋음,0.9296,,True
+S-0089,survey,data/input_images/surveys/survey_089_S-0089.jpg,2026-04-02,데이터팀,,"만족도:3, 편의성:4, 속도:2",보고서 자동화 유용,0.9052,,True
+S-0107,survey,data/input_images/surveys/survey_107_S-0107.jpg,2026-07-06,데이터팀,,"만족도:3, 편의성:4, 속도:5",메뉴 구성이 좋음,0.8857,,True
+S-0009,survey,data/input_images/surveys/survey_009_S-0009.jpg,2026-03-07,기획팀,,"만족도:5, 편의성:3, 속도:3",입력 절차가 간단함,0.9195,,True
+S-0008,survey,data/input_images/surveys/survey_008_S-0008.jpg,2026-04-03,재무팀,,"만족도:3, 편의성:5, 속도:5",입력 절차가 간단함,0.9398,,True
+S-0078,survey,data/input_images/surveys/survey_078_S-0078.jpg,2026-04-30,영업팀,,"만족도:4, 편의성:2, 속도:5",이미지 업로드 편리,0.9212,,True
+R-0068,receipt,data/input_images/receipts/receipt_068_R-0068.jpg,2026-06-19,그린오피스,223300,,프로젝트 자료,0.9747,,True
+R-0064,receipt,data/input_images/receipts/receipt_064_R-0064.jpg,2026-05-31,서울프린트,125950,,프로젝트 자료,0.9569,,True
+R-0099,receipt,data/input_images/receipts/receipt_099_R-0099.jpg,2026-04-06,스마트오피스,77550,,운영비 처리,0.9414,,True
+R-0094,receipt,data/input_images/receipts/receipt_094_R-0094.jpg,2026-06-12,디지털스캔샵,209000,,OCR 테스트용,0.9261,,True
+S-0031,survey,data/input_images/surveys/survey_031_S-0031.jpg,2026-03-06,데이터팀,,"만족도:2, 편의성:4, 속도:2",모바일 화면 개선,0.9224,,True
+S-0068,survey,data/input_images/surveys/survey_068_S-0068.jpg,2026-03-09,운영팀,,"만족도:5, 편의성:3, 속도:5",메뉴 구성이 좋음,0.9747,,True
+S-0088,survey,data/input_images/surveys/survey_088_S-0088.jpg,2026-03-14,기획팀,,"만족도:4, 편의성:2, 속도:3",보고서 자동화 유용,0.9216,,True
+S-0046,survey,data/input_images/surveys/survey_046_S-0046.jpg,2026-06-29,인사팀,,"만족도:4, 편의성:5, 속도:4",차트 설명이 필요함,0.9318,,True
+S-0047,survey,data/input_images/surveys/survey_047_S-0047.jpg,2026-03-10,데이터팀,,"만족도:4, 편의성:2, 속도:1",모바일 화면 개선,0.9065,,True
+S-0011,survey,data/input_images/surveys/survey_011_S-0011.jpg,2026-07-01,교육팀,,"만족도:2, 편의성:4, 속도:5",OCR 결과 확인 필요,0.9494,,True
+S-0105,survey,data/input_images/surveys/survey_105_S-0105.jpg,2026-04-08,영업팀,,"만족도:4, 편의성:4, 속도:4",보고서 자동화 유용,0.9484,,True
+S-0007,survey,data/input_images/surveys/survey_007_S-0007.jpg,2026-03-31,인사팀,,"만족도:2, 편의성:5, 속도:5",속도 개선 필요,0.8854,,True
+R-0081,receipt,data/input_images/receipts/receipt_081_R-0081.jpg,2026-07-09,모두카페,347050,,운영비 처리,0.8842,,True
+R-0109,receipt,data/input_images/receipts/receipt_109_R-0109.jpg,2026-03-16,스마트오피스,178200,,실습 준비용,0.9365,,True
+R-0103,receipt,data/input_images/receipts/receipt_103_R-0103.jpg,2026-04-29,서울프린트,165000,,현장 실습비,0.9496,,True
+R-0073,receipt,data/input_images/receipts/receipt_073_R-0073.jpg,2026-04-10,테크문구,61600,,프로젝트 자료,0.9717,,True
+R-0060,receipt,data/input_images/receipts/receipt_060_R-0060.jpg,2026-06-30,테크문구,147950,,OCR 테스트용,0.9119,,True
+S-0113,survey,data/input_images/surveys/survey_113_S-0113.jpg,2026-05-26,재무팀,,"만족도:4, 편의성:2, 속도:2",입력 절차가 간단함,0.9265,,True

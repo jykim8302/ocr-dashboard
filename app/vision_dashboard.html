@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📊 멀티모달 OCR 분석 대시보드 (Interactive Edition)</title>
+    <!-- Chart.js 로딩 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+        
+        :root {
+            --bg-primary: #0A192F;
+            --bg-secondary: #0F172A;
+            --card-bg: #FFFFFF;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+            --mint: #00B4D8;
+            --mint-dark: #0077B6;
+            --mint-light: #E0F2FE;
+            --border-color: #E2E8F0;
+            --danger: #EF4444;
+            --success: #10B981;
+            --amber: #F59E0B;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', 'Noto Sans KR', sans-serif;
+            background-color: #F8FAFC;
+            color: var(--text-main);
+            line-height: 1.6;
+            padding-bottom: 50px;
+        }
+
+        /* 헤더 영역 */
+        header {
+            background-color: var(--bg-primary);
+            color: #FFFFFF;
+            padding: 30px 5%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -10%;
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(0,180,216,0.15) 0%, transparent 60%);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .title-area h1 {
+            font-size: 2.2rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, #FFFFFF 30%, #00B4D8 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 5px;
+        }
+
+        .title-area p {
+            font-size: 0.95rem;
+            color: #94A3B8;
+            font-weight: 400;
+        }
+
+        /* 전처리 제어 스위치 */
+        .control-panel {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 12px 24px;
+            border-radius: 100px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        .control-panel span {
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #E2E8F0;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 64px;
+            height: 32px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #334155;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 24px;
+            width: 24px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        input:checked + .slider {
+            background-color: var(--mint);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(32px);
+        }
+
+        /* 메인 컨테이너 */
+        main {
+            max-width: 1400px;
+            margin: 30px auto;
+            padding: 0 5%;
+        }
+
+        /* KPI 그리드 */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .kpi-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(10, 25, 47, 0.03);
+            border: 1px solid var(--border-color);
+            border-top: 5px solid var(--mint);
+            position: relative;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+        }
+
+        .kpi-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(10, 25, 47, 0.08);
+        }
+
+        .kpi-label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .kpi-value {
+            font-size: 2.1rem;
+            font-weight: 800;
+            color: var(--bg-primary);
+            margin-bottom: 5px;
+            transition: color 0.3s ease;
+        }
+
+        .kpi-desc {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--success);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .kpi-desc.impute-warning {
+            color: var(--amber);
+        }
+
+        .kpi-desc.impute-safe {
+            color: var(--success);
+        }
+
+        /* 대시보드 핵심 구조 */
+        .dashboard-row {
+            display: grid;
+            grid-template-columns: 2fr 3fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        @media (max-width: 992px) {
+            .dashboard-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .chart-card {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 20px rgba(10, 25, 47, 0.03);
+        }
+
+        .chart-card h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--bg-primary);
+            margin-bottom: 20px;
+            border-left: 4px solid var(--mint);
+            padding-left: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            min-height: 320px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 3열 차트 레이아웃 */
+        .triple-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        /* 테이블 구조 */
+        .table-section {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 20px rgba(10, 25, 47, 0.03);
+        }
+
+        .table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .table-title {
+            font-size: 1.14rem;
+            font-weight: 700;
+            color: var(--bg-primary);
+            border-left: 4px solid var(--mint);
+            padding-left: 10px;
+        }
+
+        .table-search {
+            padding: 10px 18px;
+            border: 1px solid var(--border-color);
+            border-radius: 100px;
+            width: 300px;
+            font-size: 0.88rem;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .table-search:focus {
+            border-color: var(--mint);
+            box-shadow: 0 0 0 3px rgba(0,180,216,0.1);
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        th {
+            background-color: #F8FAFC;
+            padding: 14px 16px;
+            font-weight: 700;
+            color: #475569;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        td {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: #334155;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: #F8FAFC;
+        }
+
+        /* 뱃지 디자인 */
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 100px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .badge-receipt {
+            background-color: var(--mint-light);
+            color: var(--mint-dark);
+        }
+
+        .badge-survey {
+            background-color: #F1F5F9;
+            color: #475569;
+        }
+
+        .badge-danger {
+            background-color: #FEE2E2;
+            color: var(--danger);
+        }
+
+        .badge-success {
+            background-color: #D1FAE5;
+            color: var(--success);
+        }
+
+        .badge-warning {
+            background-color: #FEF3C7;
+            color: var(--amber);
+        }
+
+        /* 테이블 가짜 엠프티 상태 */
+        .table-empty {
+            padding: 50px;
+            text-align: center;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .empty-icon {
+            font-size: 3.2rem;
+            margin-bottom: 15px;
+            color: var(--success);
+        }
+
+        /* 유틸리티 */
+        .text-right {
+            text-align: right;
+        }
+        .text-center {
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 헤더 바 -->
+    <header>
+        <div class="header-content">
+            <div class="title-area">
+                <h1>📊 멀티모달 OCR 분석 대시보드</h1>
+                <p>영수증 120장 및 수기 설문지 120장에 대한 비전 필터 효과 및 스마트 보간 실시간 트래킹</p>
+            </div>
+            <div class="control-panel">
+                <span>⚙️ OpenCV 이미지 전처리 필터</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="preprocess-toggle" checked onchange="togglePreprocess()">
+                    <span class="slider"></span>
+                </label>
+                <span id="toggle-label" style="color: var(--mint); font-weight: 700; width: 35px;">ON</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- 메인 대시보드 컨텐츠 -->
+    <main>
+        <!-- KPI 그리드 -->
+        <div class="kpi-grid">
+            <div class="kpi-card" style="border-top-color: var(--bg-primary);">
+                <div class="kpi-label">📋 전체 분석 문서 수</div>
+                <div class="kpi-value" id="kpi-total">240 건</div>
+                <div class="kpi-desc" style="color: var(--text-muted)">영수증 120장 / 설문지 120장 매칭</div>
+            </div>
+            <div class="kpi-card" style="border-top-color: var(--mint);">
+                <div class="kpi-label">🎯 평균 OCR 추출 정확도</div>
+                <div class="kpi-value" id="kpi-accuracy">100.00 %</div>
+                <div class="kpi-desc" id="kpi-accuracy-desc">⭐ OpenCV 최적 보정 가동 중</div>
+            </div>
+            <div class="kpi-card" style="border-top-color: var(--amber);">
+                <div class="kpi-label">⚙️ 스마트 결측치 보완 수</div>
+                <div class="kpi-value" id="kpi-imputed">0 건</div>
+                <div class="kpi-desc" id="kpi-imputed-desc">✅ 결측 복구 필요 없음</div>
+            </div>
+            <div class="kpi-card" style="border-top-color: var(--success);">
+                <div class="kpi-label">💰 영수증 총 집행 예산</div>
+                <div class="kpi-value">₩4,834,200</div>
+                <div class="kpi-desc" style="color: var(--success)">설문지 평균 만족도: 3.6 / 5.0</div>
+            </div>
+        </div>
+
+        <!-- 2차트 행 (도넛 차트 / 막대 차트) -->
+        <div class="dashboard-row">
+            <div class="chart-card">
+                <h3>🛍️ 영수증 카테고리별 지출 비율 <span>(Donut Chart)</span></h3>
+                <div class="chart-container">
+                    <canvas id="categoryDonutChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3>🏢 설문 부서별 3대 만족도 지표 평균 <span>(Grouped Bar)</span></h3>
+                <div class="chart-container">
+                    <canvas id="deptScoresChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 품질 전후 비교 차트 행 -->
+        <div class="triple-grid">
+            <div class="chart-card" style="grid-column: span 2;">
+                <h3>📉 이미지 가독성 화질 상태별 OCR 신뢰도 비교 <span>(Before vs After)</span></h3>
+                <div class="chart-container" style="min-height: 280px;">
+                    <canvas id="confidenceCompareChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 수동 점검 대상 데이터 테이블 -->
+        <div class="table-section">
+            <div class="table-header">
+                <div class="table-title">🔍 수동 검증 및 보완 점검 필요 리스트 <span id="table-count-badge" class="badge badge-danger" style="margin-left: 10px;">0건 검출</span></div>
+                <input type="text" id="table-search" class="table-search" placeholder="문서 ID, 부서 또는 점검사유 검색..." onkeyup="searchTable()">
+            </div>
+
+            <div class="table-wrapper">
+                <table id="verification-table">
+                    <thead>
+                        <tr>
+                            <th>문서 ID</th>
+                            <th>문서 유형</th>
+                            <th>파일명</th>
+                            <th>신뢰도</th>
+                            <th>보완 항목</th>
+                            <th>점검 필요 사유</th>
+                            <th class="text-center">조치 상태</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body">
+                        <!-- 동적 로딩 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- 1. MOCK DATASETS (Before Preprocess / After Preprocess) ---
+        const data_with_preprocess = {
+            accuracy: "100.00 %",
+            accuracy_desc: "⭐ OpenCV 보정 가동 중 (+19.92%p 향상)",
+            imputed: "0건",
+            imputed_desc: "✅ 결측 복구 및 보완 필요 없음 (안전)",
+            table_badge: "0건 검출",
+            table_badge_class: "badge-success",
+            confidence_normal: 95.2,
+            confidence_noisy: 91.1,
+            table_rows: [] // 비어있음 (모두 정상 완벽 인식)
+        };
+
+        const data_no_preprocess = {
+            accuracy: "80.08 %",
+            accuracy_desc: "⚠️ 저해상도 이미지 인식 불가 발생 (정밀도 저하)",
+            imputed: "139건",
+            imputed_desc: "⚡ 결측치 임퓨테이션 및 치환 강제 실행됨",
+            table_badge: "4건 요약 샘플 표출 (총 139건 중)",
+            table_badge_class: "badge-danger",
+            confidence_normal: 95.2,
+            confidence_noisy: 55.2,
+            table_rows: [
+                { id: "R-0048", type: "receipt", file: "receipt_048_R-0048.jpg", conf: "48.5%", item: "금액, 날짜 누락", reason: "날짜 오염 판독불가 & 금액 결측 보완", status: "보완조치완료" },
+                { id: "R-0082", type: "receipt", file: "receipt_082_R-0082.jpg", conf: "51.2%", item: "날짜 누락", reason: "날짜 정형 포맷 불일치로 마스터값 복구", status: "보완조치완료" },
+                { id: "S-0056", type: "survey", file: "survey_056_S-0056.jpg", conf: "41.9%", item: "만족도 점수", reason: "수기 점수 훼손으로 기획팀 평균값 보간", status: "보완조치완료" },
+                { id: "S-0104", type: "survey", file: "survey_104_S-0104.jpg", conf: "52.4%", item: "수기 메모 누락", reason: "메모 텍스트 판독 실패로 '확인필요' 치환", status: "점검대기" }
+            ]
+        };
+
+        // --- 2. GLOBAL CHART VARIABLES ---
+        let donutChart, barChart, compareChart;
+
+        // --- 3. CHART INITIALIZATIONS ---
+        function initCharts() {
+            // A. 카테고리 지출 도넛 차트 (고정값 - 정제 후)
+            const ctxDonut = document.getElementById('categoryDonutChart').getContext('2d');
+            donutChart = new Chart(ctxDonut, {
+                type: 'doughnut',
+                data: {
+                    labels: ['비품 지출', '식대 지출', '소모품 지출', '도서인쇄비'],
+                    datasets: [{
+                        data: [1890000, 1452000, 942200, 550000],
+                        backgroundColor: ['#0A192F', '#00B4D8', '#48CAE4', '#90E0EF'],
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { font: { family: 'Outfit', size: 12 } }
+                        }
+                    },
+                    cutout: '55%'
+                }
+            });
+
+            // B. 부서별 평균 만족도 점수 (고정값 - 스마트 보간 기준)
+            const ctxBar = document.getElementById('deptScoresChart').getContext('2d');
+            barChart = new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: ['인사팀', '개발팀', '기획팀', '영업팀', '마케팅팀', '재무팀', '운영팀', '총무팀'],
+                    datasets: [
+                        {
+                            label: '만족도',
+                            data: [3.8, 3.4, 4.0, 3.5, 4.1, 3.9, 3.8, 3.6],
+                            backgroundColor: '#0A192F'
+                        },
+                        {
+                            label: '편의성',
+                            data: [3.6, 3.2, 3.2, 3.4, 2.9, 3.7, 3.7, 4.2],
+                            backgroundColor: '#00B4D8'
+                        },
+                        {
+                            label: '속도',
+                            data: [2.9, 3.3, 3.7, 3.0, 3.0, 3.3, 3.3, 2.9],
+                            backgroundColor: '#90E0EF'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { max: 5, ticks: { stepSize: 1 } }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+
+            // C. 전처리 효과 비교 차트 (가동 가변 차트)
+            const ctxCompare = document.getElementById('confidenceCompareChart').getContext('2d');
+            compareChart = new Chart(ctxCompare, {
+                type: 'bar',
+                data: {
+                    labels: ['일반 고해상도 이미지 (120장)', '저해상도 / 노이즈 이미지 (120장)'],
+                    datasets: [
+                        {
+                            label: 'OpenCV 보정 적용 시 (With Preprocess)',
+                            data: [95.2, 91.1],
+                            backgroundColor: '#00B4D8'
+                        },
+                        {
+                            label: 'OpenCV 보정 미적용 시 (Raw Noise)',
+                            data: [95.2, 55.2],
+                            backgroundColor: '#EF4444'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { max: 100, title: { display: true, text: 'OCR 판독 자신감 (Confidence, %)' } }
+                    },
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+        }
+
+        // --- 4. TOGGLE FUNCTIONALITY (동적 모핑) ---
+        function togglePreprocess() {
+            const toggle = document.getElementById('preprocess-toggle');
+            const toggleLabel = document.getElementById('toggle-label');
+            const data = toggle.checked ? data_with_preprocess : data_no_preprocess;
+
+            // 라벨 및 색상 변경
+            toggleLabel.innerText = toggle.checked ? "ON" : "OFF";
+            toggleLabel.style.color = toggle.checked ? "var(--mint)" : "var(--danger)";
+
+            // KPI 데이터 갱신
+            document.getElementById('kpi-accuracy').innerText = data.accuracy;
+            document.getElementById('kpi-accuracy-desc').innerText = data.accuracy_desc;
+            document.getElementById('kpi-imputed').innerText = data.imputed;
+            document.getElementById('kpi-imputed-desc').innerText = data.imputed_desc;
+
+            // 테이블 요약 정보 배지 변경
+            const tableBadge = document.getElementById('table-count-badge');
+            tableBadge.innerText = data.table_badge;
+            tableBadge.className = "badge " + (toggle.checked ? "badge-success" : "badge-danger");
+
+            // 테이블 로딩
+            renderTable(data.table_rows);
+
+            // 차트 갱신 (전처리 강조 하이라이팅 조절)
+            if (toggle.checked) {
+                compareChart.data.datasets[0].backgroundColor = '#00B4D8';
+                compareChart.data.datasets[1].backgroundColor = '#E2E8F0'; // 비활성화 흐리게
+            } else {
+                compareChart.data.datasets[0].backgroundColor = '#E2E8F0'; // 비활성화 흐리게
+                compareChart.data.datasets[1].backgroundColor = '#EF4444'; // 위험 색상 강조
+            }
+            compareChart.update();
+        }
+
+        // --- 5. TABLE RENDER ---
+        function renderTable(rows) {
+            const tbody = document.getElementById('table-body');
+            tbody.innerHTML = "";
+
+            if (rows.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7">
+                            <div class="table-empty">
+                                <div class="empty-icon">✓</div>
+                                <h4 style="color: var(--success); font-weight:700; margin-bottom: 5px;">인식 및 전처리 점검 클리어</h4>
+                                <p style="font-size: 0.85rem;">모든 240건의 문서가 전처리 필터를 통과하여 높은 자신감으로 완벽 인식되었습니다.</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            rows.forEach(r => {
+                const tr = document.createElement('tr');
+                const badgeClass = r.type === 'receipt' ? 'badge-receipt' : 'badge-survey';
+                const statusClass = r.status === '보완조치완료' ? 'badge-success' : 'badge-warning';
+
+                tr.innerHTML = `
+                    <td><strong>${r.id}</strong></td>
+                    <td><span class="badge ${badgeClass}">${r.type === 'receipt' ? '영수증' : '수기 설문'}</span></td>
+                    <td style="font-family: monospace;">${r.file}</td>
+                    <td><span class="badge badge-danger">${r.conf}</span></td>
+                    <td style="font-weight: 600;">${r.item}</td>
+                    <td>${r.reason}</td>
+                    <td class="text-center"><span class="badge ${statusClass}">${r.status}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // --- 6. SEARCH FILTER ---
+        function searchTable() {
+            const input = document.getElementById('table-search');
+            const filter = input.value.toLowerCase();
+            const table = document.getElementById('verification-table');
+            const tr = table.getElementsByTagName('tr');
+
+            for (let i = 1; i < tr.length; i++) {
+                let showRow = false;
+                const tds = tr[i].getElementsByTagName('td');
+                
+                // 해당 열이 공석 표기가 아닐 때만 필터링
+                if (tds.length > 1) {
+                    for (let j = 0; j < tds.length; j++) {
+                        if (tds[j]) {
+                            const txtValue = tds[j].textContent || tds[j].innerText;
+                            if (txtValue.toLowerCase().indexOf(filter) > -1) {
+                                showRow = true;
+                                break;
+                            }
+                        }
+                    }
+                    tr[i].style.display = showRow ? "" : "none";
+                }
+            }
+        }
+
+        // --- 7. LOAD EVENT ---
+        window.onload = function() {
+            initCharts();
+            togglePreprocess(); // ON 기본값 기동
+        };
+    </script>
+</body>
+</html>

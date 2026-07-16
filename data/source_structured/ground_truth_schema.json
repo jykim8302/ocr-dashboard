@@ -1,0 +1,28 @@
+{
+  "description": "OCR 실습용 원본 정답 데이터 스키마. 각 행은 이미지 1장에 대응합니다.",
+  "row_count": 240,
+  "image_count": 240,
+  "document_types": {
+    "receipt": 120,
+    "survey": 120
+  },
+  "fields": {
+    "record_id": "문서 고유 ID",
+    "document_type": "receipt 또는 survey",
+    "image_filename": "이미지 상대 경로",
+    "doc_date": "문서 일자",
+    "organization_or_store": "영수증 상호명",
+    "category": "문서 또는 비용 분류",
+    "total_amount": "영수증 합계 금액",
+    "payment_method": "영수증 결제 수단",
+    "respondent_dept": "설문 응답 부서",
+    "satisfaction_score": "설문 전체 만족도",
+    "usability_score": "설문 사용 편의성",
+    "speed_score": "설문 응답 속도",
+    "handwritten_note": "이미지에 적힌 수기 메모/의견",
+    "has_noise": "오염/스캔 노이즈 포함 여부",
+    "is_low_resolution": "저해상도/흐림 처리 여부",
+    "expected_ocr_text": "OCR이 읽어야 하는 핵심 텍스트",
+    "required_ocr_fields": "추출 필수 필드 목록"
+  }
+}

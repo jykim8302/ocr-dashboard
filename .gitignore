@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+temp_*.png
+.system_generated/
+final_output/
+final_output.zip
+.git/
+.github/
+.ipynb_checkpoints/
+*.log
+.gemini/
