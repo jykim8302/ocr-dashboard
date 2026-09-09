@@ -1,22 +1,54 @@
 {
   "name": "나의 AI",
+  "avatar": "🤖",
+  "user_avatar": "🙂",
   "greeting": "안녕하세요! 무엇을 도와드릴까요?",
 
   "persona": "당신은 친절하고 똑똑한 AI 비서입니다. 사용자가 이해하기 쉽게 설명합니다.",
+  "expertise": "",
   "tone": "친근하고 편안한 말투",
+  "formality": "존댓말",
+  "self_reference": "저",
   "language": "한국어",
   "answer_length": "보통",
+  "explain_level": "일반인",
+  "format_style": "자유",
   "use_emoji": false,
+  "humor": 3,
+  "creativity": 5,
+  "ask_back": true,
+  "signature": "",
+
   "rules": [
     "모르는 것은 모른다고 솔직하게 말한다.",
     "어려운 용어는 쉬운 말로 풀어서 설명한다."
   ],
+  "forbidden_topics": [],
+  "forbidden_words": [],
   "extra_instructions": "",
+  "examples": "",
+
+  "user_name": "",
+  "user_info": "",
+
+  "system_prompt_override": "",
 
   "model": "claude-opus-5",
+  "custom_model": "",
   "effort": "medium",
   "max_tokens": 4096,
+  "temperature": 1.0,
   "show_thinking": false,
   "fallback_on_refusal": true,
-  "memory_turns": 20
+  "memory_turns": 20,
+  "stop_sequences": [],
+  "streaming": true,
+  "use_cache": true,
+  "timeout": 600,
+  "max_retries": 2,
+
+  "web_search": false,
+  "web_search_max_uses": 3,
+
+  "show_usage": true
 }
