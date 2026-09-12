@@ -9,11 +9,40 @@ echo      나만의 AI 비서를 시작합니다
 echo   ==========================================
 echo.
 
-rem ---------- 1. 파이썬 찾기 ----------
-set PYEXE=
-where python >nul 2>nul && set PYEXE=python
+rem ---------- 1. AI 프로그램 파일 찾기 ----------
+set "APP="
+if exist "%~dp0my_ai\app.py" set "APP=%~dp0my_ai\app.py"
+if not defined APP (
+    for /f "delims=" %%F in ('dir /b /s "%~dp0app.py" 2^>nul') do (
+        if not defined APP set "APP=%%F"
+    )
+)
+if not defined APP (
+    echo   [!] AI 프로그램 파일을 찾을 수 없습니다. ^(my_ai\app.py^)
+    echo.
+    echo       지금 실행된 위치:
+    echo       %~dp0
+    echo.
+    echo       ** 가장 흔한 원인 **
+    echo       압축을 풀지 않고 zip 파일 안에서 바로 더블클릭한 경우입니다.
+    echo.
+    echo       해결 방법:
+    echo         1) 나만의AI.zip 에 우클릭 - "압축 풀기" 를 누르세요.
+    echo         2) 풀린 폴더를 열면 안에 my_ai 폴더가 보입니다.
+    echo         3) 그 폴더 안의 AI실행.bat 을 더블클릭하세요.
+    echo.
+    echo       참고 - 지금 이 폴더에 있는 것:
+    dir /b "%~dp0" 2>nul
+    echo.
+    pause
+    exit /b 1
+)
+
+rem ---------- 2. 파이썬 찾기 ----------
+set "PYEXE="
+where python >nul 2>nul && set "PYEXE=python"
 if not defined PYEXE (
-    where py >nul 2>nul && set PYEXE=py
+    where py >nul 2>nul && set "PYEXE=py"
 )
 if not defined PYEXE (
     echo   [!] 파이썬이 설치되어 있지 않습니다.
@@ -25,7 +54,7 @@ if not defined PYEXE (
     exit /b 1
 )
 
-rem ---------- 2. 필요한 프로그램 설치 ----------
+rem ---------- 3. 필요한 프로그램 설치 ----------
 %PYEXE% -c "import anthropic, streamlit" >nul 2>nul
 if errorlevel 1 (
     echo   처음 실행이라 필요한 프로그램을 설치합니다.
@@ -44,21 +73,21 @@ if errorlevel 1 (
     echo.
 )
 
-rem ---------- 3. 첫 실행 때 이메일 묻는 질문 끄기 ----------
+rem ---------- 4. 첫 실행 때 이메일 묻는 질문 끄기 ----------
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>nul
 if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
     >"%USERPROFILE%\.streamlit\credentials.toml" echo [general]
     >>"%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
 )
 
-rem ---------- 4. 실행 ----------
+rem ---------- 5. 실행 ----------
 echo   AI를 켜는 중입니다. 잠시 후 브라우저가 자동으로 열립니다.
 echo   브라우저가 안 열리면 아래에 표시되는 Local URL 주소를 복사해서 넣으세요.
 echo.
 echo   * 이 창을 닫으면 AI도 꺼집니다.
 echo.
 
-%PYEXE% -m streamlit run my_ai\app.py --browser.gatherUsageStats false
+%PYEXE% -m streamlit run "%APP%" --browser.gatherUsageStats false
 
 echo.
 echo   AI가 종료되었습니다.
