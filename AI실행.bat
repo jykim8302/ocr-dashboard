@@ -9,78 +9,83 @@ echo      나만의 AI 비서를 시작합니다
 echo   ==========================================
 echo.
 
-rem ---------- 1. AI 프로그램 파일 찾기 ----------
+rem ================= 1. AI 프로그램 파일 찾기 =================
 set "APP="
 if exist "%~dp0my_ai\app.py" set "APP=%~dp0my_ai\app.py"
-if not defined APP (
-    for /f "delims=" %%F in ('dir /b /s "%~dp0app.py" 2^>nul') do (
-        if not defined APP set "APP=%%F"
-    )
-)
-if not defined APP (
-    echo   [!] AI 프로그램 파일을 찾을 수 없습니다. ^(my_ai\app.py^)
-    echo.
-    echo       지금 실행된 위치:
-    echo       %~dp0
-    echo.
-    echo       ** 가장 흔한 원인 **
-    echo       압축을 풀지 않고 zip 파일 안에서 바로 더블클릭한 경우입니다.
-    echo.
-    echo       해결 방법:
-    echo         1) 나만의AI.zip 에 우클릭 - "압축 풀기" 를 누르세요.
-    echo         2) 풀린 폴더를 열면 안에 my_ai 폴더가 보입니다.
-    echo         3) 그 폴더 안의 AI실행.bat 을 더블클릭하세요.
-    echo.
-    echo       참고 - 지금 이 폴더에 있는 것:
-    dir /b "%~dp0" 2>nul
-    echo.
-    pause
-    exit /b 1
-)
+if defined APP goto FOUND_APP
 
-rem ---------- 2. 파이썬 찾기 ----------
+for /f "delims=" %%F in ('dir /b /s "%~dp0app.py" 2^>nul') do if not defined APP set "APP=%%F"
+if defined APP goto FOUND_APP
+
+echo   [!] AI 프로그램 파일을 찾을 수 없습니다.   my_ai\app.py
+echo.
+echo       지금 실행된 위치:
+echo       %~dp0
+echo.
+echo       ** 가장 흔한 원인 **
+echo       압축을 풀지 않고 zip 파일 안에서 바로 더블클릭한 경우입니다.
+echo.
+echo       해결 방법:
+echo         1. 나만의AI.zip 에 우클릭 - 압축 풀기 를 누르세요.
+echo         2. 풀린 폴더를 열면 안에 my_ai 폴더가 보입니다.
+echo         3. 그 폴더 안의 AI실행.bat 을 더블클릭하세요.
+echo.
+echo       참고 - 지금 이 폴더에 있는 것:
+dir /b "%~dp0" 2>nul
+echo.
+pause
+exit /b 1
+
+:FOUND_APP
+
+rem ================= 2. 파이썬 찾기 =================
 set "PYEXE="
 where python >nul 2>nul && set "PYEXE=python"
-if not defined PYEXE (
-    where py >nul 2>nul && set "PYEXE=py"
-)
-if not defined PYEXE (
-    echo   [!] 파이썬이 설치되어 있지 않습니다.
-    echo.
-    echo       https://www.python.org/downloads/ 에서 설치하세요.
-    echo       설치 화면에서 "Add python.exe to PATH" 를 꼭 체크하세요.
-    echo.
-    pause
-    exit /b 1
-)
+if defined PYEXE goto FOUND_PY
+where py >nul 2>nul && set "PYEXE=py"
+if defined PYEXE goto FOUND_PY
 
-rem ---------- 3. 필요한 프로그램 설치 ----------
+echo   [!] 파이썬이 설치되어 있지 않습니다.
+echo.
+echo       https://www.python.org/downloads/ 에서 설치하세요.
+echo       설치 화면에서 Add python.exe to PATH 를 꼭 체크하세요.
+echo.
+pause
+exit /b 1
+
+:FOUND_PY
+
+rem ================= 3. 필요한 프로그램 설치 =================
 %PYEXE% -c "import anthropic, streamlit" >nul 2>nul
-if errorlevel 1 (
-    echo   처음 실행이라 필요한 프로그램을 설치합니다.
-    echo   인터넷 속도에 따라 2~5분 걸릴 수 있습니다. 그대로 기다려 주세요...
-    echo.
-    %PYEXE% -m pip install --upgrade pip --quiet --disable-pip-version-check --no-warn-script-location
-    %PYEXE% -m pip install --quiet --disable-pip-version-check --no-warn-script-location "anthropic>=1.0.0" "streamlit>=1.31.0"
-    if errorlevel 1 (
-        echo.
-        echo   [!] 설치에 실패했습니다. 인터넷 연결을 확인하고 다시 실행해 주세요.
-        echo.
-        pause
-        exit /b 1
-    )
-    echo   설치가 끝났습니다.
-    echo.
-)
+if not errorlevel 1 goto HAVE_DEPS
 
-rem ---------- 4. 첫 실행 때 이메일 묻는 질문 끄기 ----------
+echo   처음 실행이라 필요한 프로그램을 설치합니다.
+echo   인터넷 속도에 따라 2~5분 걸릴 수 있습니다. 그대로 기다려 주세요...
+echo.
+%PYEXE% -m pip install --upgrade pip --quiet --disable-pip-version-check --no-warn-script-location
+%PYEXE% -m pip install --quiet --disable-pip-version-check --no-warn-script-location "anthropic>=1.0.0" "streamlit>=1.31.0"
+if errorlevel 1 goto INSTALL_FAILED
+echo   설치가 끝났습니다.
+echo.
+goto HAVE_DEPS
+
+:INSTALL_FAILED
+echo.
+echo   [!] 설치에 실패했습니다. 인터넷 연결을 확인하고 다시 실행해 주세요.
+echo.
+pause
+exit /b 1
+
+:HAVE_DEPS
+
+rem ================= 4. 첫 실행 때 이메일 질문 끄기 =================
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit" >nul 2>nul
-if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
-    >"%USERPROFILE%\.streamlit\credentials.toml" echo [general]
-    >>"%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
-)
+if exist "%USERPROFILE%\.streamlit\credentials.toml" goto CREDS_OK
+>"%USERPROFILE%\.streamlit\credentials.toml" echo [general]
+>>"%USERPROFILE%\.streamlit\credentials.toml" echo email = ""
+:CREDS_OK
 
-rem ---------- 5. 실행 ----------
+rem ================= 5. 실행 =================
 echo   AI를 켜는 중입니다. 잠시 후 브라우저가 자동으로 열립니다.
 echo   브라우저가 안 열리면 아래에 표시되는 Local URL 주소를 복사해서 넣으세요.
 echo.
