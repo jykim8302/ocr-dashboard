@@ -257,6 +257,12 @@ user32.PostThreadMessageW.argtypes = [DWORD, UINT, WPARAM, LPARAM]
 user32.RegisterHotKey.argtypes = [HWND, ctypes.c_int, UINT, UINT]
 user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+user32.mouse_event.argtypes = [DWORD, DWORD, DWORD, DWORD, ULONG_PTR]
+user32.keybd_event.argtypes = [ctypes.c_ubyte, ctypes.c_ubyte,
+                               DWORD, ULONG_PTR]
+user32.GetForegroundWindow.restype = HWND
+user32.GetWindowTextW.argtypes = [HWND, ctypes.c_wchar_p, ctypes.c_int]
+user32.GetWindowThreadProcessId.argtypes = [HWND, ctypes.POINTER(DWORD)]
 user32.SystemParametersInfoW.restype = BOOL
 user32.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM]
 user32.UnregisterHotKey.argtypes = [HWND, ctypes.c_int]
@@ -327,6 +333,10 @@ class Engine:
         self.path_buffer = 0        # GetRawInputBuffer 로 읽은 횟수
         self.path_single = 0        # GetRawInputData 로 읽은 횟수
         self._trace_left = 0        # 패킷 내용을 로그로 남길 남은 횟수
+        # 재생 방식 (거부당하면 단계적으로 낮춘다)
+        self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
+        self.send_fail = 0
+        self.use_legacy = False
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -560,6 +570,38 @@ class Engine:
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         self._restore_mouse()
 
+    # ---------- 입력 내보내기 (거부당하면 다른 방식으로 내려간다)
+    def _emit_legacy(self, batch):
+        """SendInput 이 막힐 때 쓰는 구형 API 경로."""
+        for i in batch:
+            if i.type == INPUT_MOUSE:
+                user32.mouse_event(i.mi.dwFlags, i.mi.dx, i.mi.dy,
+                                   i.mi.mouseData, SIGNATURE)
+            else:
+                user32.keybd_event(0, i.ki.wScan & 0xFF, i.ki.dwFlags,
+                                   SIGNATURE)
+
+    def _emit(self, batch):
+        if not batch:
+            return
+        if self.use_legacy:
+            self._emit_legacy(batch)
+            return
+        n = send(batch)
+        if n == len(batch):
+            self.send_fail = 0
+            return
+        err = ctypes.get_last_error()
+        self.send_fail += 1
+        if self.move_flags & MOUSEEVENTF_MOVE_NOCOALESCE:
+            self.move_flags = MOUSEEVENTF_MOVE
+            self.log("SendInput 이 거부되었습니다(오류 {}). 단순 이동 "
+                     "방식으로 바꿉니다.".format(err))
+        elif self.send_fail >= 8:
+            self.use_legacy = True
+            self.log("SendInput 이 계속 거부되어(오류 {}) 구형 방식으로 "
+                     "바꿉니다.".format(err))
+
     # ---------- Raw Input 자체 검사
     def selftest(self):
         """재생용 합성 입력이 Raw Input 스트림에 실제로 나타나는지 확인한다.
@@ -571,77 +613,117 @@ class Engine:
         self.selftest_running = True
         threading.Thread(target=self._selftest_worker, daemon=True).start()
 
+    def _environment(self):
+        """검사에 도움이 되는 주변 상황을 모아 로그로 남긴다."""
+        try:
+            admin = ctypes.WinDLL("shell32").IsUserAnAdmin()
+            self.log("이 프로그램 권한: {}".format(
+                "관리자" if admin else "일반 사용자"))
+        except Exception:
+            pass
+        try:
+            hwnd = user32.GetForegroundWindow()
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, buf, 256)
+            pid = DWORD(0)
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            self.log("맨 앞 창: \"{}\" (프로세스 {})".format(
+                buf.value or "제목 없음", pid.value))
+        except Exception:
+            pass
+        try:
+            bits = 64 if ctypes.sizeof(ctypes.c_void_p) == 8 else 32
+            self.log("파이썬 {}비트 · INPUT 구조체 {}바이트".format(
+                bits, ctypes.sizeof(INPUT)))
+        except Exception:
+            pass
+
+    def _try_method(self, name, mover, shots=10):
+        """한 가지 입력 방법을 시험하고 결과를 돌려준다."""
+        pt0 = POINT()
+        user32.GetCursorPos(ctypes.byref(pt0))
+        b_total, b_inj = self.pkt_total, self.inj_packets
+        ok = 0
+        err = 0
+        ctypes.set_last_error(0)
+        for _ in range(shots):
+            for dx in (6, -6):
+                if mover(dx):
+                    ok += 1
+                else:
+                    err = ctypes.get_last_error()
+                time.sleep(0.012)
+        time.sleep(0.35)
+        pt1 = POINT()
+        user32.GetCursorPos(ctypes.byref(pt1))
+        moved = (pt0.x != pt1.x) or (pt0.y != pt1.y)
+        res = {"name": name, "ok": ok, "total": shots * 2, "err": err,
+               "moved": moved, "arrived": self.pkt_total - b_total,
+               "inj": self.inj_packets - b_inj}
+        self.log("[{}] 성공 {}/{} · 오류코드 {} · 커서움직임 {} · "
+                 "도착패킷 {} · 합성판정 {}".format(
+                     name, res["ok"], res["total"], res["err"],
+                     "있음" if moved else "없음", res["arrived"], res["inj"]))
+        return res
+
     def _selftest_worker(self):
         try:
-            pt0 = POINT()
-            user32.GetCursorPos(ctypes.byref(pt0))
-            b_total = self.pkt_total
-            b_inj = self.inj_packets
-            b_hdev0 = self.pkt_hdev0
-            b_sig = self.pkt_sig
-            b_buf = self.path_buffer
-            b_one = self.path_single
+            self.log("=" * 50)
+            self.log("Raw Input 재생 검사 시작")
+            self._environment()
+            self._trace_left = 8
 
-            self.log("─" * 46)
-            self.log("검사 시작. 합성 입력 20개를 보냅니다.")
-            self._trace_left = 6   # 도착한 패킷 몇 개를 그대로 찍어 본다
+            flags_nc = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
+            results = []
+            results.append(self._try_method(
+                "SendInput 기본", lambda dx: send(
+                    [mouse_input(dx, 0, 0, flags_nc)]) == 1))
+            results.append(self._try_method(
+                "SendInput 단순", lambda dx: send(
+                    [mouse_input(dx, 0, 0, MOUSEEVENTF_MOVE)]) == 1))
 
-            sent = 0
-            fails = 0
-            flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
-            for _ in range(10):
-                for dx in (6, -6):
-                    n = send([mouse_input(dx, 0, 0, flags)])
-                    if n == 1:
-                        sent += 1
-                    else:
-                        fails += 1
-                        if fails == 1:
-                            self.log("SendInput 실패. 오류 코드 {}".format(
-                                ctypes.get_last_error()))
-                    time.sleep(0.015)
-            time.sleep(0.4)
+            def legacy(dx):
+                user32.mouse_event(MOUSEEVENTF_MOVE, dx, 0, 0, SIGNATURE)
+                return True
+            results.append(self._try_method("구형 mouse_event", legacy))
+
             self._trace_left = 0
+            best = None
+            for r in results:
+                if r["inj"] > 0:
+                    best = r
+                    break
+            worked = [r for r in results if r["moved"]]
 
-            pt1 = POINT()
-            user32.GetCursorPos(ctypes.byref(pt1))
-            arrived = self.pkt_total - b_total
-            inj = self.inj_packets - b_inj
-            hdev0 = self.pkt_hdev0 - b_hdev0
-            sig = self.pkt_sig - b_sig
-
-            self.log("보낸 입력: {}개 성공 / {}개 실패".format(sent, fails))
-            self.log("커서 위치: ({}, {}) → ({}, {})".format(
-                pt0.x, pt0.y, pt1.x, pt1.y))
-            self.log("그 사이 도착한 마우스 패킷: {}개".format(arrived))
-            self.log("  · 장치 핸들이 0 인 것: {}개".format(hdev0))
-            self.log("  · 우리 표식이 붙은 것: {}개".format(sig))
-            self.log("읽기 경로: 버퍼 {}회 / 단건 {}회".format(
-                self.path_buffer - b_buf, self.path_single - b_one))
-
-            if sent == 0:
-                self.log("판정: 입력 자체가 들어가지 않았습니다. 관리자 권한으로 "
-                         "실행되는 창이 떠 있으면 이 프로그램도 관리자로 "
-                         "실행해야 합니다.")
-            elif arrived == 0 and self.raw_packets == 0:
-                self.log("판정: Raw Input 이 아예 들어오지 않고 있습니다. "
-                         "마우스를 움직여 위쪽 패킷 수가 오르는지 먼저 "
-                         "확인해 주세요.")
-            elif inj > 0:
-                self.log("판정: 되돌아왔습니다. 보낸 입력이 Raw Input 으로 "
-                         "잡힙니다.")
-                self.log("      장치 핸들은 {} 입니다. 0 이면 합성 입력이라는 "
-                         "표시입니다.".format(self.inj_hdevice))
-            elif arrived > 0:
-                self.log("판정: 패킷은 도착했지만 합성 입력으로 가려내지 "
-                         "못했습니다. 위의 패킷 내용을 확인해 주세요.")
-            else:
+            self.log("-" * 50)
+            if best:
+                self.log("판정: 재생 입력이 Raw Input 으로 잡힙니다.")
+                self.log("      성공한 방법은 [{}] 입니다. 장치 핸들 {}.".format(
+                    best["name"], self.inj_hdevice))
+                self.log("      Raw Input 을 읽는 프로그램은 이 입력을 받습니다.")
+            elif worked:
                 self.log("판정: 커서는 움직였지만 Raw Input 으로는 돌아오지 "
-                         "않았습니다. 이 PC 에서는 합성 입력이 Raw Input "
-                         "스트림에 나타나지 않습니다.")
+                         "않았습니다.")
+                self.log("      이 PC 에서는 합성 입력이 Raw Input 스트림에 "
+                         "나타나지 않습니다.")
                 self.log("      Raw Input 만 읽는 프로그램을 움직이려면 실제 "
                          "USB 장치가 필요합니다.")
-            self.log("─" * 46)
+            else:
+                codes = sorted({r["err"] for r in results if r["err"]})
+                self.log("판정: 입력이 전혀 들어가지 않았습니다. 오류 코드 "
+                         "{}".format(codes or "없음"))
+                if 5 in codes:
+                    self.log("      코드 5 는 권한 부족입니다. 맨 앞 창이 "
+                             "관리자 권한으로 돌고 있습니다.")
+                    self.log("      이 프로그램도 마우스 오른쪽 버튼 → "
+                             "관리자 권한으로 실행 하면 됩니다.")
+                else:
+                    self.log("      보안 프로그램이나 게임이 입력 주입을 "
+                             "막고 있을 수 있습니다.")
+            if self.raw_packets == 0:
+                self.log("참고: 하드웨어 원시 입력이 하나도 안 잡혔습니다. "
+                         "마우스를 움직여 위쪽 숫자가 오르는지 봐 주세요.")
+            self.log("=" * 50)
         except Exception as e:
             self.log("검사 오류: {}".format(e))
         finally:
@@ -689,6 +771,9 @@ class Engine:
             self.log("재생할 기록이 없습니다. 먼저 F9로 녹화하세요.")
             return
         self._stop_play.clear()
+        self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
+        self.send_fail = 0
+        self.use_legacy = False
         self.playing = True
         self._play_thread = threading.Thread(
             target=self._play_worker,
@@ -747,9 +832,8 @@ class Engine:
                                     fl |= MOUSEEVENTF_VIRTUALDESK
                                 batch.append(mouse_input(dx, dy, 0, fl))
                             else:
-                                batch.append(mouse_input(
-                                    dx, dy, 0,
-                                    MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE))
+                                batch.append(mouse_input(dx, dy, 0,
+                                                         self.move_flags))
                         if bf:
                             for raw_flag, si_flag, xdata, press, release in BUTTON_MAP:
                                 if bf & raw_flag:
@@ -773,7 +857,7 @@ class Engine:
                         else:
                             held_keys[scan] = fl
                         batch.append(key_input(scan, fl))
-                    send(batch)
+                    self._emit(batch)
                 if self._stop_play.is_set():
                     break
                 if (total < 0 or count < total) and gap > 0:
@@ -791,7 +875,7 @@ class Engine:
                     rel.append(mouse_input(0, 0, data, fl))
             for scan, fl in held_keys.items():
                 rel.append(key_input(scan, fl | KEYEVENTF_KEYUP))
-            send(rel)
+            self._emit(rel)
             self._restore_mouse()
             try:
                 winmm.timeEndPeriod(1)
@@ -826,8 +910,8 @@ class App:
         self.root = root
         self.eng = engine
         root.title(APP_NAME)
-        root.geometry("460x560")
-        root.minsize(420, 520)
+        root.geometry("520x760")
+        root.minsize(460, 600)
 
         pad = {"padx": 10, "pady": 4}
         top = ttk.Frame(root, padding=10)
@@ -890,13 +974,28 @@ class App:
         diag = ttk.Frame(root, padding=(10, 2))
         diag.pack(fill="x")
         ttk.Button(diag, text="재생 입력이 Raw Input 으로 잡히는지 검사",
-                   command=self.eng.selftest).pack(fill="x", padx=3)
+                   command=self.eng.selftest).pack(fill="x", padx=3, pady=(0, 4))
+        ttk.Button(diag, text="관리자 권한으로 다시 실행",
+                   command=self.restart_as_admin).pack(fill="x", padx=3)
 
         logf = ttk.LabelFrame(root, text="로그", padding=6)
         logf.pack(fill="both", expand=True, **pad)
-        self.log = tk.Text(logf, height=8, wrap="word", state="disabled",
-                           bg="#1e1e1e", fg="#d4d4d4", relief="flat")
-        self.log.pack(fill="both", expand=True)
+        bar = ttk.Scrollbar(logf, orient="vertical")
+        bar.pack(side="right", fill="y")
+        self.log = tk.Text(logf, height=16, wrap="word", state="disabled",
+                           bg="#1e1e1e", fg="#d4d4d4", relief="flat",
+                           yscrollcommand=bar.set)
+        self.log.pack(side="left", fill="both", expand=True)
+        bar.configure(command=self.log.yview)
+
+        logbtn = ttk.Frame(root, padding=(10, 0, 10, 8))
+        logbtn.pack(fill="x")
+        ttk.Button(logbtn, text="로그 전체 복사",
+                   command=self.copy_log).pack(side="left", expand=True,
+                                               fill="x", padx=3)
+        ttk.Button(logbtn, text="로그 지우기",
+                   command=self.clear_log).pack(side="left", expand=True,
+                                                fill="x", padx=3)
 
         self._rate_t = time.perf_counter()
         self._rate_n = 0
@@ -951,6 +1050,34 @@ class App:
                 self.eng.load(p)
             except Exception as e:
                 messagebox.showerror(APP_NAME, "불러오기 실패: {}".format(e))
+
+    def restart_as_admin(self):
+        """입력이 권한 때문에 막힐 때 같은 프로그램을 관리자로 다시 연다."""
+        try:
+            script = os.path.abspath(__file__)
+            r = ctypes.WinDLL("shell32").ShellExecuteW(
+                None, "runas", sys.executable, '"{}"'.format(script), None, 1)
+            if int(r) > 32:
+                self.eng.shutdown()
+                self.root.after(300, self.root.destroy)
+            else:
+                self.eng.log("관리자 실행이 취소되었습니다.")
+        except Exception as e:
+            self.eng.log("관리자 실행 실패: {}".format(e))
+
+    def copy_log(self):
+        try:
+            text = self.log.get("1.0", "end").strip()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.eng.log("로그를 클립보드에 복사했습니다. 붙여넣기 하세요.")
+        except Exception as e:
+            self.eng.log("복사 실패: {}".format(e))
+
+    def clear_log(self):
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
 
     def pump(self):
         while True:
