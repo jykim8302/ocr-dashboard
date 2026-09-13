@@ -106,6 +106,18 @@ MOUSEEVENTF_VIRTUALDESK = 0x4000
 MOUSEEVENTF_WHEEL = 0x0800
 MOUSEEVENTF_HWHEEL = 0x1000
 MOUSEEVENTF_MOVE_NOCOALESCE = 0x2000
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_MIDDLEDOWN = 0x0020
+MOUSEEVENTF_MIDDLEUP = 0x0040
+
+# 피코(USB 장치)로 보낼 때 쓰는 값
+PICO_SYNC = 0xAB
+GENERIC_WRITE = 0x40000000
+OPEN_EXISTING = 3
+INVALID_HANDLE = (1 << (8 * ctypes.sizeof(ctypes.c_void_p))) - 1
 
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
@@ -274,6 +286,121 @@ kernel32.GetModuleHandleW.restype = HMODULE
 kernel32.GetModuleHandleW.argtypes = [LPCWSTR]
 
 
+class DCB(ctypes.Structure):
+    _fields_ = [("DCBlength", DWORD), ("BaudRate", DWORD), ("flags", DWORD),
+                ("wReserved", WORD), ("XonLim", WORD), ("XoffLim", WORD),
+                ("ByteSize", ctypes.c_ubyte), ("Parity", ctypes.c_ubyte),
+                ("StopBits", ctypes.c_ubyte), ("XonChar", ctypes.c_char),
+                ("XoffChar", ctypes.c_char), ("ErrorChar", ctypes.c_char),
+                ("EofChar", ctypes.c_char), ("EvtChar", ctypes.c_char),
+                ("wReserved1", WORD)]
+
+
+class COMMTIMEOUTS(ctypes.Structure):
+    _fields_ = [("ReadIntervalTimeout", DWORD),
+                ("ReadTotalTimeoutMultiplier", DWORD),
+                ("ReadTotalTimeoutConstant", DWORD),
+                ("WriteTotalTimeoutMultiplier", DWORD),
+                ("WriteTotalTimeoutConstant", DWORD)]
+
+
+kernel32.CreateFileW.restype = HANDLE
+kernel32.CreateFileW.argtypes = [LPCWSTR, DWORD, DWORD, ctypes.c_void_p,
+                                 DWORD, DWORD, HANDLE]
+kernel32.WriteFile.argtypes = [HANDLE, ctypes.c_void_p, DWORD,
+                               ctypes.POINTER(DWORD), ctypes.c_void_p]
+kernel32.CloseHandle.argtypes = [HANDLE]
+kernel32.GetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
+kernel32.SetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
+kernel32.SetCommTimeouts.argtypes = [HANDLE, ctypes.POINTER(COMMTIMEOUTS)]
+
+
+def _open_com(name):
+    """COM 포트를 열어 핸들을 돌려준다. 실패하면 None."""
+    h = kernel32.CreateFileW("\\\\.\\" + name, GENERIC_WRITE, 0, None,
+                             OPEN_EXISTING, 0, None)
+    if not h or h == INVALID_HANDLE:
+        return None
+    return h
+
+
+def list_com_ports():
+    """지금 쓸 수 있는 COM 포트 목록을 만든다."""
+    found = []
+    for i in range(1, 65):
+        name = "COM{}".format(i)
+        ctypes.set_last_error(0)
+        h = _open_com(name)
+        if h:
+            kernel32.CloseHandle(h)
+            found.append(name)
+        elif ctypes.get_last_error() == 5:
+            found.append(name)   # 이미 누가 쓰는 중이지만 존재하는 포트
+    return found
+
+
+class PicoLink:
+    """피코와 이어 주는 시리얼 통로."""
+
+    def __init__(self):
+        self.handle = None
+        self.name = None
+
+    def open(self, name):
+        self.close()
+        h = _open_com(name)
+        if not h:
+            return False
+        try:
+            dcb = DCB()
+            dcb.DCBlength = ctypes.sizeof(DCB)
+            kernel32.GetCommState(h, ctypes.byref(dcb))
+            dcb.BaudRate = 115200
+            dcb.ByteSize = 8
+            dcb.Parity = 0
+            dcb.StopBits = 0
+            kernel32.SetCommState(h, ctypes.byref(dcb))
+            to = COMMTIMEOUTS(0, 0, 0, 0, 200)
+            kernel32.SetCommTimeouts(h, ctypes.byref(to))
+        except Exception:
+            pass
+        self.handle = h
+        self.name = name
+        return True
+
+    def write(self, data):
+        if not self.handle or not data:
+            return False
+        written = DWORD(0)
+        buf = ctypes.create_string_buffer(bytes(data))
+        ok = kernel32.WriteFile(self.handle, buf, len(data),
+                                ctypes.byref(written), None)
+        return bool(ok) and written.value == len(data)
+
+    def close(self):
+        if self.handle:
+            try:
+                kernel32.CloseHandle(self.handle)
+            except Exception:
+                pass
+        self.handle = None
+        self.name = None
+
+
+def pico_frames(dx, dy, buttons, wheel):
+    """피코가 알아듣는 5바이트 묶음으로 쪼갠다 (한 번에 127 까지)."""
+    out = bytearray()
+    while True:
+        cx = max(-127, min(127, dx)); dx -= cx
+        cy = max(-127, min(127, dy)); dy -= cy
+        cw = max(-127, min(127, wheel)); wheel -= cw
+        out += bytes([PICO_SYNC, cx & 0xFF, cy & 0xFF,
+                      buttons & 0xFF, cw & 0xFF])
+        if dx == 0 and dy == 0 and wheel == 0:
+            break
+    return bytes(out)
+
+
 def to_signed16(v):
     return v - 0x10000 if v & 0x8000 else v
 
@@ -337,6 +464,10 @@ class Engine:
         self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
         self.send_fail = 0
         self.use_legacy = False
+        # 피코(진짜 USB 장치)로 재생하기
+        self.pico = PicoLink()
+        self.use_pico = False
+        self.pico_btn = 0
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -564,6 +695,7 @@ class Engine:
     def shutdown(self):
         self.recording = False
         self.stop_play()
+        self.pico.close()
         if self.hwnd:
             for hid in (HOTKEY_RECORD, HOTKEY_PLAY, HOTKEY_STOP):
                 user32.UnregisterHotKey(self.hwnd, hid)
@@ -581,8 +713,39 @@ class Engine:
                 user32.keybd_event(0, i.ki.wScan & 0xFF, i.ki.dwFlags,
                                    SIGNATURE)
 
+    def _emit_pico(self, batch):
+        """재생 입력을 피코로 넘겨 진짜 마우스가 움직이게 한다."""
+        data = bytearray()
+        for i in batch:
+            if i.type != INPUT_MOUSE:
+                continue  # 키보드는 피코 마우스로 보낼 수 없다
+            fl = i.mi.dwFlags
+            for flag, bit, on in ((MOUSEEVENTF_LEFTDOWN, 0x01, True),
+                                  (MOUSEEVENTF_LEFTUP, 0x01, False),
+                                  (MOUSEEVENTF_RIGHTDOWN, 0x02, True),
+                                  (MOUSEEVENTF_RIGHTUP, 0x02, False),
+                                  (MOUSEEVENTF_MIDDLEDOWN, 0x04, True),
+                                  (MOUSEEVENTF_MIDDLEUP, 0x04, False)):
+                if fl & flag:
+                    if on:
+                        self.pico_btn |= bit
+                    else:
+                        self.pico_btn &= ~bit
+            wheel = 0
+            if fl & MOUSEEVENTF_WHEEL:
+                wheel = int(ctypes.c_int32(i.mi.mouseData).value / 120)
+            dx = int(i.mi.dx) if fl & MOUSEEVENTF_MOVE else 0
+            dy = int(i.mi.dy) if fl & MOUSEEVENTF_MOVE else 0
+            data += pico_frames(dx, dy, self.pico_btn, wheel)
+        if data and not self.pico.write(data):
+            self.use_pico = False
+            self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+
     def _emit(self, batch):
         if not batch:
+            return
+        if self.use_pico and self.pico.handle:
+            self._emit_pico(batch)
             return
         if self.use_legacy:
             self._emit_legacy(batch)
@@ -774,6 +937,7 @@ class Engine:
         self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
         self.send_fail = 0
         self.use_legacy = False
+        self.pico_btn = 0
         self.playing = True
         self._play_thread = threading.Thread(
             target=self._play_worker,
@@ -910,8 +1074,8 @@ class App:
         self.root = root
         self.eng = engine
         root.title(APP_NAME)
-        root.geometry("520x760")
-        root.minsize(460, 600)
+        root.geometry("540x880")
+        root.minsize(480, 640)
 
         pad = {"padx": 10, "pady": 4}
         top = ttk.Frame(root, padding=10)
@@ -977,6 +1141,24 @@ class App:
                    command=self.eng.selftest).pack(fill="x", padx=3, pady=(0, 4))
         ttk.Button(diag, text="관리자 권한으로 다시 실행",
                    command=self.restart_as_admin).pack(fill="x", padx=3)
+
+        picof = ttk.LabelFrame(root, text="피코로 재생 (진짜 USB 마우스)",
+                               padding=10)
+        picof.pack(fill="x", **pad)
+        prow = ttk.Frame(picof)
+        prow.pack(fill="x")
+        self.v_pico = tk.BooleanVar(value=False)
+        ttk.Checkbutton(prow, text="피코 사용", variable=self.v_pico,
+                        command=self.toggle_pico).pack(side="left")
+        ttk.Label(prow, text="포트").pack(side="left", padx=(12, 4))
+        self.port_var = tk.StringVar()
+        self.port_box = ttk.Combobox(prow, textvariable=self.port_var,
+                                     width=10, state="readonly")
+        self.port_box.pack(side="left")
+        ttk.Button(prow, text="포트 찾기",
+                   command=self.refresh_ports).pack(side="left", padx=6)
+        ttk.Button(picof, text="연결 시험 (커서가 네모를 그립니다)",
+                   command=self.test_pico).pack(fill="x", pady=(8, 0))
 
         logf = ttk.LabelFrame(root, text="로그", padding=6)
         logf.pack(fill="both", expand=True, **pad)
@@ -1050,6 +1232,52 @@ class App:
                 self.eng.load(p)
             except Exception as e:
                 messagebox.showerror(APP_NAME, "불러오기 실패: {}".format(e))
+
+    def refresh_ports(self):
+        ports = list_com_ports()
+        self.port_box["values"] = ports
+        if ports and not self.port_var.get():
+            self.port_var.set(ports[-1])
+        self.eng.log("찾은 포트: {}".format(", ".join(ports) if ports
+                                           else "없음"))
+
+    def toggle_pico(self):
+        if self.v_pico.get():
+            name = self.port_var.get()
+            if not name:
+                self.eng.log("먼저 포트를 고르세요. 포트 찾기 를 눌러보세요.")
+                self.v_pico.set(False)
+                return
+            if self.eng.pico.open(name):
+                self.eng.use_pico = True
+                self.eng.log("피코 연결됨: {}. 이제 재생이 진짜 USB "
+                             "마우스로 나갑니다.".format(name))
+            else:
+                self.v_pico.set(False)
+                self.eng.log("포트를 열지 못했습니다: {}".format(name))
+        else:
+            self.eng.use_pico = False
+            self.eng.pico.close()
+            self.eng.log("피코 연결을 끊었습니다.")
+
+    def test_pico(self):
+        if not self.eng.pico.handle:
+            self.eng.log("먼저 피코 사용 을 켜서 연결하세요.")
+            return
+        threading.Thread(target=self._test_pico_worker, daemon=True).start()
+
+    def _test_pico_worker(self):
+        try:
+            self.eng.log("연결 시험 신호를 보냅니다.")
+            for dx, dy in ((5, 0), (0, 5), (-5, 0), (0, -5)):
+                for _ in range(20):
+                    if not self.eng.pico.write(pico_frames(dx, dy, 0, 0)):
+                        self.eng.log("보내기 실패. 포트를 다시 확인하세요.")
+                        return
+                    time.sleep(0.008)
+            self.eng.log("보냈습니다. 커서가 네모를 그렸으면 성공입니다.")
+        except Exception as e:
+            self.eng.log("시험 실패: {}".format(e))
 
     def restart_as_admin(self):
         """입력이 권한 때문에 막힐 때 같은 프로그램을 관리자로 다시 연다."""
