@@ -973,6 +973,7 @@ class Engine:
         self._pico_dx = self._pico_dy = self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
+        self._pico_kbd_warned = False
         self.playing = True
         self._play_thread = threading.Thread(
             target=self._play_worker,
