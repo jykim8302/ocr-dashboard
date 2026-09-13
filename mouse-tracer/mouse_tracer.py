@@ -468,6 +468,11 @@ class Engine:
         self.pico = PicoLink()
         self.use_pico = False
         self.pico_btn = 0
+        self._pico_dx = 0
+        self._pico_dy = 0
+        self._pico_wheel = 0
+        self._pico_sent_btn = 0
+        self._pico_flush_t = 0.0
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -713,33 +718,53 @@ class Engine:
                 user32.keybd_event(0, i.ki.wScan & 0xFF, i.ki.dwFlags,
                                    SIGNATURE)
 
+    def _pico_flush(self):
+        """모아 둔 이동량을 피코로 한 번에 보낸다."""
+        dx, dy = self._pico_dx, self._pico_dy
+        wheel = self._pico_wheel
+        self._pico_dx = self._pico_dy = self._pico_wheel = 0
+        self._pico_flush_t = time.perf_counter()
+        if not (dx or dy or wheel or self.pico_btn != self._pico_sent_btn):
+            return
+        self._pico_sent_btn = self.pico_btn
+        if not self.pico.write(pico_frames(dx, dy, self.pico_btn, wheel)):
+            self.use_pico = False
+            self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+
     def _emit_pico(self, batch):
-        """재생 입력을 피코로 넘겨 진짜 마우스가 움직이게 한다."""
-        data = bytearray()
+        """재생 입력을 피코로 넘겨 진짜 마우스가 움직이게 한다.
+
+        USB 마우스가 낼 수 있는 속도보다 빠르게 보내면 밀리기만 하므로,
+        잔잔한 이동은 잠깐 모았다가 보낸다. 버튼과 휠은 바로 보낸다.
+        """
+        now_urgent = False
         for i in batch:
             if i.type != INPUT_MOUSE:
                 continue  # 키보드는 피코 마우스로 보낼 수 없다
             fl = i.mi.dwFlags
-            for flag, bit, on in ((MOUSEEVENTF_LEFTDOWN, 0x01, True),
-                                  (MOUSEEVENTF_LEFTUP, 0x01, False),
-                                  (MOUSEEVENTF_RIGHTDOWN, 0x02, True),
-                                  (MOUSEEVENTF_RIGHTUP, 0x02, False),
-                                  (MOUSEEVENTF_MIDDLEDOWN, 0x04, True),
-                                  (MOUSEEVENTF_MIDDLEUP, 0x04, False)):
+            before = self.pico_btn
+            for flag, bit, press in ((MOUSEEVENTF_LEFTDOWN, 0x01, True),
+                                     (MOUSEEVENTF_LEFTUP, 0x01, False),
+                                     (MOUSEEVENTF_RIGHTDOWN, 0x02, True),
+                                     (MOUSEEVENTF_RIGHTUP, 0x02, False),
+                                     (MOUSEEVENTF_MIDDLEDOWN, 0x04, True),
+                                     (MOUSEEVENTF_MIDDLEUP, 0x04, False)):
                 if fl & flag:
-                    if on:
+                    if press:
                         self.pico_btn |= bit
                     else:
                         self.pico_btn &= ~bit
-            wheel = 0
+            if fl & MOUSEEVENTF_MOVE:
+                self._pico_dx += int(i.mi.dx)
+                self._pico_dy += int(i.mi.dy)
             if fl & MOUSEEVENTF_WHEEL:
-                wheel = int(ctypes.c_int32(i.mi.mouseData).value / 120)
-            dx = int(i.mi.dx) if fl & MOUSEEVENTF_MOVE else 0
-            dy = int(i.mi.dy) if fl & MOUSEEVENTF_MOVE else 0
-            data += pico_frames(dx, dy, self.pico_btn, wheel)
-        if data and not self.pico.write(data):
-            self.use_pico = False
-            self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+                self._pico_wheel += int(ctypes.c_int32(i.mi.mouseData).value / 120)
+                now_urgent = True
+            if self.pico_btn != before:
+                now_urgent = True
+
+        if now_urgent or (time.perf_counter() - self._pico_flush_t) >= 0.004:
+            self._pico_flush()
 
     def _emit(self, batch):
         if not batch:
@@ -938,6 +963,9 @@ class Engine:
         self.send_fail = 0
         self.use_legacy = False
         self.pico_btn = 0
+        self._pico_dx = self._pico_dy = self._pico_wheel = 0
+        self._pico_sent_btn = 0
+        self._pico_flush_t = 0.0
         self.playing = True
         self._play_thread = threading.Thread(
             target=self._play_worker,
@@ -1040,6 +1068,8 @@ class Engine:
             for scan, fl in held_keys.items():
                 rel.append(key_input(scan, fl | KEYEVENTF_KEYUP))
             self._emit(rel)
+            if self.use_pico and self.pico.handle:
+                self._pico_flush()
             self._restore_mouse()
             try:
                 winmm.timeEndPeriod(1)
