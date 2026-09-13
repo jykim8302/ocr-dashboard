@@ -317,6 +317,9 @@ class Engine:
         self.raw_dy = 0
         self.raw_devices = {}       # 장치 핸들 -> 이름
         self.raw_buffered = 0       # 버퍼로 한 번에 긁어온 패킷 수
+        self.inj_packets = 0        # 우리가 보낸 입력이 Raw Input 으로 되돌아온 수
+        self.inj_hdevice = None     # 그때의 장치 핸들 (합성 입력은 보통 0)
+        self.selftest_running = False
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -377,7 +380,11 @@ class Engine:
         if raw.header.dwType == RIM_TYPEMOUSE:
             m = raw.data.mouse
             if m.ulExtraInformation == SIGNATURE:
-                return  # 우리가 재생한 입력은 다시 기록하지 않는다
+                # 우리가 재생한 입력이다. 기록하지는 않지만,
+                # Raw Input 스트림으로 되돌아왔다는 사실은 세어 둔다.
+                self.inj_packets += 1
+                self.inj_hdevice = int(raw.header.hDevice or 0)
+                return
             self.raw_packets += 1
             handle = int(raw.header.hDevice or 0)
             if handle not in self.raw_devices:
@@ -394,6 +401,8 @@ class Engine:
         elif raw.header.dwType == RIM_TYPEKEYBOARD:
             k = raw.data.keyboard
             if k.ExtraInformation == SIGNATURE:
+                self.inj_packets += 1
+                self.inj_hdevice = int(raw.header.hDevice or 0)
                 return
             self.raw_packets += 1
             if not (self.recording and self.record_keyboard):
@@ -527,6 +536,45 @@ class Engine:
                 user32.UnregisterHotKey(self.hwnd, hid)
             user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         self._restore_mouse()
+
+    # ---------- Raw Input 자체 검사
+    def selftest(self):
+        """재생용 합성 입력이 Raw Input 스트림에 실제로 나타나는지 확인한다.
+
+        커서가 제자리로 돌아오도록 좌우로 같은 양만큼만 움직인다.
+        """
+        if self.selftest_running or self.playing or self.recording:
+            return
+        self.selftest_running = True
+        threading.Thread(target=self._selftest_worker, daemon=True).start()
+
+    def _selftest_worker(self):
+        try:
+            before = self.inj_packets
+            self.log("검사 시작. 합성 입력 20개를 보냅니다.")
+            for _ in range(10):
+                send([mouse_input(4, 0, 0,
+                                  MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE)])
+                time.sleep(0.015)
+                send([mouse_input(-4, 0, 0,
+                                  MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE)])
+                time.sleep(0.015)
+            time.sleep(0.3)
+            got = self.inj_packets - before
+            if got > 0:
+                self.log("결과: 보낸 입력 중 {}개가 Raw Input(WM_INPUT)으로 "
+                         "되돌아왔습니다.".format(got))
+                self.log("     장치 핸들 hDevice = {}. 0 이면 합성 입력이라는 "
+                         "뜻이며, 하드웨어 입력은 0 이 아닙니다.".format(
+                             self.inj_hdevice))
+                self.log("     Raw Input 을 읽는 프로그램은 이 입력을 받습니다. "
+                         "다만 hDevice 로 걸러내면 막힐 수 있습니다.")
+            else:
+                self.log("결과: Raw Input 으로 되돌아오지 않았습니다.")
+        except Exception as e:
+            self.log("검사 오류: {}".format(e))
+        finally:
+            self.selftest_running = False
 
     # ---------- 마우스 가속 임시 해제 (재생 후 원래대로 복구)
     def _disable_accel(self):
@@ -720,6 +768,8 @@ class App:
         ttk.Label(top, textvariable=self.info, foreground="#555").pack(anchor="w")
         self.raw_info = tk.StringVar(value="Raw Input 준비 중…")
         ttk.Label(top, textvariable=self.raw_info, foreground="#1565c0").pack(anchor="w")
+        self.play_info = tk.StringVar(value="")
+        ttk.Label(top, textvariable=self.play_info, foreground="#6a1b9a").pack(anchor="w")
 
         btns = ttk.Frame(root, padding=(10, 6))
         btns.pack(fill="x")
@@ -764,6 +814,11 @@ class App:
         fio.pack(fill="x")
         ttk.Button(fio, text="파일로 저장", command=self.on_save).pack(side="left", expand=True, fill="x", padx=3)
         ttk.Button(fio, text="파일 불러오기", command=self.on_load).pack(side="left", expand=True, fill="x", padx=3)
+
+        diag = ttk.Frame(root, padding=(10, 2))
+        diag.pack(fill="x")
+        ttk.Button(diag, text="재생 입력이 Raw Input 으로 잡히는지 검사",
+                   command=self.eng.selftest).pack(fill="x", padx=3)
 
         logf = ttk.LabelFrame(root, text="로그", padding=6)
         logf.pack(fill="both", expand=True, **pad)
@@ -871,6 +926,10 @@ class App:
         self.raw_info.set(
             "Raw Input 동작 중 · 초당 {}패킷 · 최근 이동 dx {:+d}, dy {:+d} · 장치 {}개"
             .format(self._rate, self.eng.raw_dx, self.eng.raw_dy, dev))
+        if self.eng.inj_packets:
+            self.play_info.set(
+                "재생 입력이 Raw Input 으로 되돌아온 수: {}개 (hDevice = {})"
+                .format(self.eng.inj_packets, self.eng.inj_hdevice))
 
     def on_close(self):
         self.eng.shutdown()
