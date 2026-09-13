@@ -89,6 +89,10 @@ MOUSE_VIRTUAL_DESKTOP = 0x02
 RI_MOUSE_WHEEL = 0x0400
 RI_MOUSE_HWHEEL = 0x0800
 
+RIDI_DEVICENAME = 0x20000007
+RIDI_DEVICEINFO = 0x2000000B
+RAW_ALIGN = 8 if ctypes.sizeof(ctypes.c_void_p) == 8 else 4
+
 RI_KEY_BREAK = 0x01
 RI_KEY_E0 = 0x02
 RI_KEY_E1 = 0x04
@@ -237,6 +241,12 @@ user32.GetRawInputData.restype = UINT
 user32.GetRawInputData.argtypes = [ctypes.c_void_p, UINT,
                                    ctypes.POINTER(RAWINPUT),
                                    ctypes.POINTER(UINT), UINT]
+user32.GetRawInputBuffer.restype = UINT
+user32.GetRawInputBuffer.argtypes = [ctypes.POINTER(ctypes.c_ubyte),
+                                     ctypes.POINTER(UINT), UINT]
+user32.GetRawInputDeviceInfoW.restype = UINT
+user32.GetRawInputDeviceInfoW.argtypes = [HANDLE, UINT, ctypes.c_void_p,
+                                          ctypes.POINTER(UINT)]
 user32.RegisterRawInputDevices.restype = BOOL
 user32.RegisterRawInputDevices.argtypes = [ctypes.POINTER(RAWINPUTDEVICE),
                                            UINT, UINT]
@@ -300,6 +310,14 @@ class Engine:
         self._wndproc = None
         self._saved_mouse = None
         self._play_thread = None
+        # Raw Input 상태 표시용
+        self.raw_ready = False
+        self.raw_packets = 0        # 지금까지 받은 원시 패킷 수
+        self.raw_dx = 0             # 마지막 원시 이동량
+        self.raw_dy = 0
+        self.raw_devices = {}       # 장치 핸들 -> 이름
+        self.raw_buffered = 0       # 버퍼로 한 번에 긁어온 패킷 수
+        self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
     def log(self, msg):
@@ -330,39 +348,104 @@ class Engine:
     def duration(self):
         return self.events[-1][1] if self.events else 0.0
 
-    # ---------- 원시 입력 처리
-    def _on_raw(self, lparam):
-        if not self.recording:
-            return
+    # ---------- 원시 입력 처리 (Raw Input)
+    def _device_name(self, handle):
+        """어느 장치에서 온 원시 입력인지 이름을 한 번만 알아낸다."""
+        if handle in self.raw_devices:
+            return self.raw_devices[handle]
+        name = "알 수 없는 장치"
+        try:
+            need = UINT(0)
+            user32.GetRawInputDeviceInfoW(HANDLE(handle), RIDI_DEVICENAME,
+                                          None, ctypes.byref(need))
+            if 0 < need.value < 4096:
+                buf = ctypes.create_unicode_buffer(need.value + 1)
+                if user32.GetRawInputDeviceInfoW(
+                        HANDLE(handle), RIDI_DEVICENAME,
+                        ctypes.cast(buf, ctypes.c_void_p),
+                        ctypes.byref(need)) != 0xFFFFFFFF:
+                    name = buf.value or name
+        except Exception:
+            pass
+        self.raw_devices[handle] = name
+        return name
+
+    def _handle_packet(self, raw):
+        """RAWINPUT 한 개를 해석해 통계에 반영하고, 녹화 중이면 기록한다."""
+        t = (time.perf_counter() - self._t0) if self.recording else 0.0
+
+        if raw.header.dwType == RIM_TYPEMOUSE:
+            m = raw.data.mouse
+            if m.ulExtraInformation == SIGNATURE:
+                return  # 우리가 재생한 입력은 다시 기록하지 않는다
+            self.raw_packets += 1
+            handle = int(raw.header.hDevice or 0)
+            if handle not in self.raw_devices:
+                self.log("원시 입력 장치 감지: {}".format(self._device_name(handle)))
+            bf = m.btn.usButtonFlags
+            bd = to_signed16(m.btn.usButtonData)
+            if m.lLastX or m.lLastY:
+                self.raw_dx, self.raw_dy = int(m.lLastX), int(m.lLastY)
+            if self.recording and (m.lLastX or m.lLastY or bf):
+                self.events.append(["m", round(t, 6), int(m.lLastX),
+                                    int(m.lLastY), int(bf), int(bd),
+                                    int(m.usFlags)])
+
+        elif raw.header.dwType == RIM_TYPEKEYBOARD:
+            k = raw.data.keyboard
+            if k.ExtraInformation == SIGNATURE:
+                return
+            self.raw_packets += 1
+            if not (self.recording and self.record_keyboard):
+                return
+            if k.VKey in (VK_F6, VK_F7, VK_F8):
+                return  # 단축키는 기록하지 않는다
+            if k.MakeCode == 0:
+                return
+            self.events.append(["k", round(t, 6), int(k.MakeCode),
+                                int(k.Flags), int(k.VKey)])
+
+    def _drain_buffer(self):
+        """GetRawInputBuffer 로 쌓인 원시 패킷을 한 번에 모두 가져온다.
+
+        폴링 속도가 높은 마우스(1000Hz 등)에서 패킷을 흘리지 않기 위한 경로다.
+        """
+        got_any = 0
+        for _ in range(64):  # 무한 루프 방지
+            size = UINT(ctypes.sizeof(self._buf))
+            n = user32.GetRawInputBuffer(self._buf, ctypes.byref(size),
+                                         ctypes.sizeof(RAWINPUTHEADER))
+            if n == 0 or n == 0xFFFFFFFF:
+                break
+            addr = ctypes.addressof(self._buf)
+            for _i in range(n):
+                ri = RAWINPUT.from_address(addr)
+                self._handle_packet(ri)
+                step = ri.header.dwSize
+                if step <= 0:
+                    break
+                addr = (addr + step + RAW_ALIGN - 1) & ~(RAW_ALIGN - 1)
+            got_any += n
+            if n < 2:
+                break
+        if got_any > 1:
+            self.raw_buffered = got_any
+        return got_any
+
+    def _read_one(self, lparam):
+        """버퍼가 비어 있을 때 이번 WM_INPUT 한 건만 직접 읽는다."""
         raw = RAWINPUT()
         size = UINT(ctypes.sizeof(RAWINPUT))
         got = user32.GetRawInputData(ctypes.c_void_p(lparam), RID_INPUT,
                                      ctypes.byref(raw), ctypes.byref(size),
                                      ctypes.sizeof(RAWINPUTHEADER))
-        if got == 0xFFFFFFFF:
+        if got == 0 or got == 0xFFFFFFFF:
             return
-        t = time.perf_counter() - self._t0
+        self._handle_packet(raw)
 
-        if raw.header.dwType == RIM_TYPEMOUSE:
-            m = raw.data.mouse
-            if m.ulExtraInformation == SIGNATURE:
-                return  # 우리가 재생한 입력은 무시
-            bf = m.btn.usButtonFlags
-            bd = to_signed16(m.btn.usButtonData)
-            if m.lLastX or m.lLastY or bf:
-                self.events.append(["m", round(t, 6), int(m.lLastX),
-                                    int(m.lLastY), int(bf), int(bd),
-                                    int(m.usFlags)])
-        elif raw.header.dwType == RIM_TYPEKEYBOARD and self.record_keyboard:
-            k = raw.data.keyboard
-            if k.ExtraInformation == SIGNATURE:
-                return
-            if k.VKey in (VK_F6, VK_F7, VK_F8):
-                return  # 단축키는 기록하지 않음
-            if k.MakeCode == 0:
-                return
-            self.events.append(["k", round(t, 6), int(k.MakeCode),
-                                int(k.Flags), int(k.VKey)])
+    def _on_raw(self, lparam):
+        if not self._drain_buffer():
+            self._read_one(lparam)
 
     # ---------- 메시지 루프 스레드
     def listener(self):
@@ -405,7 +488,9 @@ class Engine:
         if not user32.RegisterRawInputDevices(devs, 2, ctypes.sizeof(RAWINPUTDEVICE)):
             self.log("Raw Input 등록 실패 (오류 {})".format(ctypes.get_last_error()))
         else:
-            self.log("Raw Input 준비 완료.")
+            self.raw_ready = True
+            self.log("Raw Input 등록 완료. 마우스와 키보드의 원시 입력을 "
+                     "직접 받습니다.")
 
         ok = []
         for hid, vk, name in ((HOTKEY_RECORD, VK_F6, "F6"),
@@ -633,6 +718,8 @@ class App:
         lbl.pack(anchor="w")
         self.info = tk.StringVar(value="기록 없음")
         ttk.Label(top, textvariable=self.info, foreground="#555").pack(anchor="w")
+        self.raw_info = tk.StringVar(value="Raw Input 준비 중…")
+        ttk.Label(top, textvariable=self.raw_info, foreground="#1565c0").pack(anchor="w")
 
         btns = ttk.Frame(root, padding=(10, 6))
         btns.pack(fill="x")
@@ -683,6 +770,10 @@ class App:
         self.log = tk.Text(logf, height=8, wrap="word", state="disabled",
                            bg="#1e1e1e", fg="#d4d4d4", relief="flat")
         self.log.pack(fill="both", expand=True)
+
+        self._rate_t = time.perf_counter()
+        self._rate_n = 0
+        self._rate = 0
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.pump()
@@ -762,7 +853,24 @@ class App:
         n = len(self.eng.events)
         self.info.set("기록 없음" if n == 0 else
                       "이벤트 {}개 · 길이 {:.2f}초".format(n, self.eng.duration()))
+        self.update_raw_info()
         self.root.after(60, self.pump)
+
+    def update_raw_info(self):
+        """원시 입력이 실제로 들어오고 있는지 초당 패킷 수로 보여준다."""
+        now = time.perf_counter()
+        span = now - self._rate_t
+        if span >= 0.5:
+            self._rate = int((self.eng.raw_packets - self._rate_n) / span)
+            self._rate_n = self.eng.raw_packets
+            self._rate_t = now
+        if not self.eng.raw_ready:
+            self.raw_info.set("Raw Input 준비 중…")
+            return
+        dev = len(self.eng.raw_devices)
+        self.raw_info.set(
+            "Raw Input 동작 중 · 초당 {}패킷 · 최근 이동 dx {:+d}, dy {:+d} · 장치 {}개"
+            .format(self._rate, self.eng.raw_dx, self.eng.raw_dy, dev))
 
     def on_close(self):
         self.eng.shutdown()
