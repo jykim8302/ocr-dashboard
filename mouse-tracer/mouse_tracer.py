@@ -113,7 +113,7 @@ SPI_GETMOUSESPEED = 0x0070
 SPI_SETMOUSESPEED = 0x0071
 SPIF_SENDCHANGE = 0x02
 
-VK_F9, VK_F10, VK_F11 = 0x78, 0x79, 0x7A
+VK_F6, VK_F7, VK_F8 = 0x75, 0x76, 0x77
 HOTKEY_RECORD, HOTKEY_PLAY, HOTKEY_STOP = 1, 2, 3
 
 # (Raw 플래그, SendInput 플래그, X버튼 데이터, 누를 때 이름, 뗄 때 이름)
@@ -318,7 +318,7 @@ class Engine:
             self.start_pos = (pt.x, pt.y)
             self._t0 = time.perf_counter()
             self.recording = True
-        self.log("녹화 시작. 마우스를 움직이세요. (F9 = 중지)")
+        self.log("녹화 시작. 마우스를 움직이세요. (F6 = 중지)")
 
     def stop_record(self):
         if not self.recording:
@@ -357,7 +357,7 @@ class Engine:
             k = raw.data.keyboard
             if k.ExtraInformation == SIGNATURE:
                 return
-            if k.VKey in (VK_F9, VK_F10, VK_F11):
+            if k.VKey in (VK_F6, VK_F7, VK_F8):
                 return  # 단축키는 기록하지 않음
             if k.MakeCode == 0:
                 return
@@ -408,9 +408,9 @@ class Engine:
             self.log("Raw Input 준비 완료.")
 
         ok = []
-        for hid, vk, name in ((HOTKEY_RECORD, VK_F9, "F9"),
-                              (HOTKEY_PLAY, VK_F10, "F10"),
-                              (HOTKEY_STOP, VK_F11, "F11")):
+        for hid, vk, name in ((HOTKEY_RECORD, VK_F6, "F6"),
+                              (HOTKEY_PLAY, VK_F7, "F7"),
+                              (HOTKEY_STOP, VK_F8, "F8")):
             if user32.RegisterHotKey(self.hwnd, hid, 0, vk):
                 ok.append(name)
         if len(ok) < 3:
@@ -519,7 +519,7 @@ class Engine:
                 self._disable_accel()
             total = repeat if repeat > 0 else -1
             count = 0
-            self.log("재생 시작 ({}회, {}배속). 정지는 F10 또는 F11".format(
+            self.log("재생 시작 ({}회, {}배속). 정지는 F7 또는 F8".format(
                 "무한" if repeat <= 0 else repeat, speed))
             while total < 0 or count < total:
                 if self._stop_play.is_set():
@@ -636,9 +636,9 @@ class App:
 
         btns = ttk.Frame(root, padding=(10, 6))
         btns.pack(fill="x")
-        self.b_rec = ttk.Button(btns, text="● 녹화  (F9)", command=self.toggle_record)
-        self.b_play = ttk.Button(btns, text="▶ 재생  (F10)", command=self.toggle_play)
-        self.b_stop = ttk.Button(btns, text="■ 정지  (F11)", command=self.stop_all)
+        self.b_rec = ttk.Button(btns, text="● 녹화  (F6)", command=self.toggle_record)
+        self.b_play = ttk.Button(btns, text="▶ 재생  (F7)", command=self.toggle_play)
+        self.b_stop = ttk.Button(btns, text="■ 정지  (F8)", command=self.stop_all)
         for b in (self.b_rec, self.b_play, self.b_stop):
             b.pack(side="left", expand=True, fill="x", padx=3)
 
@@ -686,7 +686,7 @@ class App:
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.pump()
-        self.eng.log("F9 녹화 시작/중지 · F10 재생 시작/중지 · F11 모두 정지")
+        self.eng.log("F6 녹화 시작/중지 · F7 재생 시작/중지 · F8 모두 정지")
 
     def sync_opts(self):
         self.eng.record_keyboard = self.v_kbd.get()
@@ -750,15 +750,15 @@ class App:
 
         if self.eng.recording:
             self.status.set("● 녹화 중…")
-            self.b_rec.configure(text="● 녹화 중지 (F9)")
+            self.b_rec.configure(text="● 녹화 중지 (F6)")
         elif self.eng.playing:
             self.status.set("▶ 재생 중…")
-            self.b_rec.configure(text="● 녹화  (F9)")
+            self.b_rec.configure(text="● 녹화  (F6)")
         else:
             self.status.set("대기 중")
-            self.b_rec.configure(text="● 녹화  (F9)")
-        self.b_play.configure(text="■ 재생 중지 (F10)" if self.eng.playing
-                              else "▶ 재생  (F10)")
+            self.b_rec.configure(text="● 녹화  (F6)")
+        self.b_play.configure(text="■ 재생 중지 (F7)" if self.eng.playing
+                              else "▶ 재생  (F7)")
         n = len(self.eng.events)
         self.info.set("기록 없음" if n == 0 else
                       "이벤트 {}개 · 길이 {:.2f}초".format(n, self.eng.duration()))
