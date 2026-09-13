@@ -473,6 +473,7 @@ class Engine:
         self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
+        self._pico_kbd_warned = False
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -740,7 +741,13 @@ class Engine:
         now_urgent = False
         for i in batch:
             if i.type != INPUT_MOUSE:
-                continue  # 키보드는 피코 마우스로 보낼 수 없다
+                # 피코는 마우스로만 동작해서 키보드는 보낼 수 없다.
+                # 조용히 사라지면 헷갈리니 한 번은 알려 준다.
+                if not self._pico_kbd_warned:
+                    self._pico_kbd_warned = True
+                    self.log("피코 재생 중에는 키보드 입력이 빠집니다. "
+                             "마우스만 나갑니다.")
+                continue
             fl = i.mi.dwFlags
             before = self.pico_btn
             for flag, bit, press in ((MOUSEEVENTF_LEFTDOWN, 0x01, True),
