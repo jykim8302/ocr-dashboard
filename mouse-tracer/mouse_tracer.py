@@ -273,10 +273,11 @@ def to_signed16(v):
 
 
 def send(inputs):
+    """입력을 넣고, 실제로 들어간 개수를 돌려준다."""
     if not inputs:
-        return
+        return 0
     arr = (INPUT * len(inputs))(*inputs)
-    user32.SendInput(len(inputs), arr, ctypes.sizeof(INPUT))
+    return int(user32.SendInput(len(inputs), arr, ctypes.sizeof(INPUT)))
 
 
 def mouse_input(dx=0, dy=0, data=0, flags=0):
@@ -320,6 +321,12 @@ class Engine:
         self.inj_packets = 0        # 우리가 보낸 입력이 Raw Input 으로 되돌아온 수
         self.inj_hdevice = None     # 그때의 장치 핸들 (합성 입력은 보통 0)
         self.selftest_running = False
+        self.pkt_total = 0          # 받은 마우스 패킷 전체
+        self.pkt_hdev0 = 0          # 그중 장치 핸들이 0 인 것
+        self.pkt_sig = 0            # 그중 우리 표식이 붙은 것
+        self.path_buffer = 0        # GetRawInputBuffer 로 읽은 횟수
+        self.path_single = 0        # GetRawInputData 로 읽은 횟수
+        self._trace_left = 0        # 패킷 내용을 로그로 남길 남은 횟수
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -379,18 +386,32 @@ class Engine:
 
         if raw.header.dwType == RIM_TYPEMOUSE:
             m = raw.data.mouse
-            if m.ulExtraInformation == SIGNATURE:
-                # 우리가 재생한 입력이다. 기록하지는 않지만,
-                # Raw Input 스트림으로 되돌아왔다는 사실은 세어 둔다.
-                self.inj_packets += 1
-                self.inj_hdevice = int(raw.header.hDevice or 0)
-                return
-            self.raw_packets += 1
             handle = int(raw.header.hDevice or 0)
-            if handle not in self.raw_devices:
-                self.log("원시 입력 장치 감지: {}".format(self._device_name(handle)))
+            extra = int(m.ulExtraInformation)
             bf = m.btn.usButtonFlags
             bd = to_signed16(m.btn.usButtonData)
+
+            self.pkt_total += 1
+            if handle == 0:
+                self.pkt_hdev0 += 1
+            if extra == SIGNATURE:
+                self.pkt_sig += 1
+            if self._trace_left > 0:
+                self._trace_left -= 1
+                self.log("   패킷 hDevice={} extra=0x{:X} dx={} dy={} "
+                         "usFlags=0x{:X} btn=0x{:X}".format(
+                             handle, extra, int(m.lLastX), int(m.lLastY),
+                             int(m.usFlags), int(bf)))
+
+            # 합성 입력 판정: 우리 표식이 있거나, 장치 핸들이 0 이거나
+            if extra == SIGNATURE or handle == 0:
+                self.inj_packets += 1
+                self.inj_hdevice = handle
+                return
+
+            self.raw_packets += 1
+            if handle not in self.raw_devices:
+                self.log("원시 입력 장치 감지: {}".format(self._device_name(handle)))
             if m.lLastX or m.lLastY:
                 self.raw_dx, self.raw_dy = int(m.lLastX), int(m.lLastY)
             if self.recording and (m.lLastX or m.lLastY or bf):
@@ -400,7 +421,7 @@ class Engine:
 
         elif raw.header.dwType == RIM_TYPEKEYBOARD:
             k = raw.data.keyboard
-            if k.ExtraInformation == SIGNATURE:
+            if int(k.ExtraInformation) == SIGNATURE:
                 self.inj_packets += 1
                 self.inj_hdevice = int(raw.header.hDevice or 0)
                 return
@@ -435,6 +456,7 @@ class Engine:
                     break
                 addr = (addr + step + RAW_ALIGN - 1) & ~(RAW_ALIGN - 1)
             got_any += n
+            self.path_buffer += 1
             if n < 2:
                 break
         if got_any > 1:
@@ -450,6 +472,7 @@ class Engine:
                                      ctypes.sizeof(RAWINPUTHEADER))
         if got == 0 or got == 0xFFFFFFFF:
             return
+        self.path_single += 1
         self._handle_packet(raw)
 
     def _on_raw(self, lparam):
@@ -550,30 +573,79 @@ class Engine:
 
     def _selftest_worker(self):
         try:
-            before = self.inj_packets
+            pt0 = POINT()
+            user32.GetCursorPos(ctypes.byref(pt0))
+            b_total = self.pkt_total
+            b_inj = self.inj_packets
+            b_hdev0 = self.pkt_hdev0
+            b_sig = self.pkt_sig
+            b_buf = self.path_buffer
+            b_one = self.path_single
+
+            self.log("─" * 46)
             self.log("검사 시작. 합성 입력 20개를 보냅니다.")
+            self._trace_left = 6   # 도착한 패킷 몇 개를 그대로 찍어 본다
+
+            sent = 0
+            fails = 0
+            flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
             for _ in range(10):
-                send([mouse_input(4, 0, 0,
-                                  MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE)])
-                time.sleep(0.015)
-                send([mouse_input(-4, 0, 0,
-                                  MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE)])
-                time.sleep(0.015)
-            time.sleep(0.3)
-            got = self.inj_packets - before
-            if got > 0:
-                self.log("결과: 보낸 입력 중 {}개가 Raw Input(WM_INPUT)으로 "
-                         "되돌아왔습니다.".format(got))
-                self.log("     장치 핸들 hDevice = {}. 0 이면 합성 입력이라는 "
-                         "뜻이며, 하드웨어 입력은 0 이 아닙니다.".format(
-                             self.inj_hdevice))
-                self.log("     Raw Input 을 읽는 프로그램은 이 입력을 받습니다. "
-                         "다만 hDevice 로 걸러내면 막힐 수 있습니다.")
+                for dx in (6, -6):
+                    n = send([mouse_input(dx, 0, 0, flags)])
+                    if n == 1:
+                        sent += 1
+                    else:
+                        fails += 1
+                        if fails == 1:
+                            self.log("SendInput 실패. 오류 코드 {}".format(
+                                ctypes.get_last_error()))
+                    time.sleep(0.015)
+            time.sleep(0.4)
+            self._trace_left = 0
+
+            pt1 = POINT()
+            user32.GetCursorPos(ctypes.byref(pt1))
+            arrived = self.pkt_total - b_total
+            inj = self.inj_packets - b_inj
+            hdev0 = self.pkt_hdev0 - b_hdev0
+            sig = self.pkt_sig - b_sig
+
+            self.log("보낸 입력: {}개 성공 / {}개 실패".format(sent, fails))
+            self.log("커서 위치: ({}, {}) → ({}, {})".format(
+                pt0.x, pt0.y, pt1.x, pt1.y))
+            self.log("그 사이 도착한 마우스 패킷: {}개".format(arrived))
+            self.log("  · 장치 핸들이 0 인 것: {}개".format(hdev0))
+            self.log("  · 우리 표식이 붙은 것: {}개".format(sig))
+            self.log("읽기 경로: 버퍼 {}회 / 단건 {}회".format(
+                self.path_buffer - b_buf, self.path_single - b_one))
+
+            if sent == 0:
+                self.log("판정: 입력 자체가 들어가지 않았습니다. 관리자 권한으로 "
+                         "실행되는 창이 떠 있으면 이 프로그램도 관리자로 "
+                         "실행해야 합니다.")
+            elif arrived == 0 and self.raw_packets == 0:
+                self.log("판정: Raw Input 이 아예 들어오지 않고 있습니다. "
+                         "마우스를 움직여 위쪽 패킷 수가 오르는지 먼저 "
+                         "확인해 주세요.")
+            elif inj > 0:
+                self.log("판정: 되돌아왔습니다. 보낸 입력이 Raw Input 으로 "
+                         "잡힙니다.")
+                self.log("      장치 핸들은 {} 입니다. 0 이면 합성 입력이라는 "
+                         "표시입니다.".format(self.inj_hdevice))
+            elif arrived > 0:
+                self.log("판정: 패킷은 도착했지만 합성 입력으로 가려내지 "
+                         "못했습니다. 위의 패킷 내용을 확인해 주세요.")
             else:
-                self.log("결과: Raw Input 으로 되돌아오지 않았습니다.")
+                self.log("판정: 커서는 움직였지만 Raw Input 으로는 돌아오지 "
+                         "않았습니다. 이 PC 에서는 합성 입력이 Raw Input "
+                         "스트림에 나타나지 않습니다.")
+                self.log("      Raw Input 만 읽는 프로그램을 움직이려면 실제 "
+                         "USB 장치가 필요합니다.")
+            self.log("─" * 46)
         except Exception as e:
             self.log("검사 오류: {}".format(e))
         finally:
+            self._trace_left = 0
             self.selftest_running = False
 
     # ---------- 마우스 가속 임시 해제 (재생 후 원래대로 복구)
