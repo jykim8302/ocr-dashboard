@@ -75,6 +75,7 @@ WM_CLOSE = 0x0010
 WM_DESTROY = 0x0002
 WM_QUIT = 0x0012
 WM_APP_STOP = 0x8001
+WM_APP_REHOTKEY = 0x8002
 
 RIDEV_REMOVE = 0x00000001
 RIDEV_INPUTSINK = 0x00000100
@@ -129,8 +130,66 @@ SPI_GETMOUSESPEED = 0x0070
 SPI_SETMOUSESPEED = 0x0071
 SPIF_SENDCHANGE = 0x02
 
-VK_F6, VK_F7, VK_F8 = 0x75, 0x76, 0x77
 HOTKEY_RECORD, HOTKEY_PLAY, HOTKEY_STOP = 1, 2, 3
+ACTIONS = (("record", HOTKEY_RECORD, "녹화"),
+           ("play", HOTKEY_PLAY, "재생"),
+           ("stop", HOTKEY_STOP, "정지"))
+
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_NOREPEAT = 0x01, 0x02, 0x04, 0x4000
+
+# 단축키로 고를 수 있는 키 목록 (이름 -> 가상 키 코드)
+KEY_CODES = {}
+for _i in range(1, 13):
+    KEY_CODES["F{}".format(_i)] = 0x6F + _i          # F1 = 0x70
+for _i in range(10):
+    KEY_CODES["숫자패드 {}".format(_i)] = 0x60 + _i   # NumPad0 = 0x60
+KEY_CODES.update({
+    "Insert": 0x2D, "Delete": 0x2E, "Home": 0x24, "End": 0x23,
+    "PageUp": 0x21, "PageDown": 0x22, "ScrollLock": 0x91, "Pause": 0x13,
+    "숫자패드 *": 0x6A, "숫자패드 +": 0x6B, "숫자패드 -": 0x6D,
+    "숫자패드 /": 0x6F, "물결표 `": 0xC0,
+})
+KEY_NAMES = sorted(KEY_CODES, key=lambda k: (KEY_CODES[k], k))
+
+DEFAULT_HOTKEYS = {"record": ["F6", 0], "play": ["F7", 0], "stop": ["F8", 0]}
+
+
+SETTINGS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "mouse_tracer_settings.json")
+
+
+def load_settings():
+    """지난번에 쓰던 설정을 읽어 온다. 없거나 깨졌으면 빈 값."""
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(data):
+    """지금 설정을 파일에 적어 둔다."""
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def hotkey_text(entry):
+    """['F6', 2] 같은 값을 'Ctrl+F6' 처럼 보여 줄 글자로 바꾼다."""
+    name, mods = entry[0], int(entry[1])
+    parts = []
+    if mods & MOD_CONTROL:
+        parts.append("Ctrl")
+    if mods & MOD_ALT:
+        parts.append("Alt")
+    if mods & MOD_SHIFT:
+        parts.append("Shift")
+    parts.append(name)
+    return "+".join(parts)
 
 # (Raw 플래그, SendInput 플래그, X버튼 데이터, 누를 때 이름, 뗄 때 이름)
 BUTTON_MAP = [
@@ -439,6 +498,8 @@ class Engine:
         self._lock = threading.Lock()
         self.log_q = queue.Queue()
         self.record_keyboard = True
+        self.hotkeys = dict((k, list(v)) for k, v in DEFAULT_HOTKEYS.items())
+        self.hotkey_vks = set()   # 녹화에서 빼야 할 단축키의 키 코드
         self.hwnd = None
         self.thread_id = None
         self._wndproc = None
@@ -575,7 +636,7 @@ class Engine:
             self.raw_packets += 1
             if not (self.recording and self.record_keyboard):
                 return
-            if k.VKey in (VK_F6, VK_F7, VK_F8):
+            if k.VKey in self.hotkey_vks:
                 return  # 단축키는 기록하지 않는다
             if k.MakeCode == 0:
                 return
@@ -640,6 +701,9 @@ class Engine:
             if msg == WM_HOTKEY:
                 self._on_hotkey(int(wparam))
                 return 0
+            if msg == WM_APP_REHOTKEY:
+                self._register_hotkeys()
+                return 0
             if msg == WM_DESTROY:
                 user32.PostQuitMessage(0)
                 return 0
@@ -671,20 +735,44 @@ class Engine:
             self.log("Raw Input 등록 완료. 마우스와 키보드의 원시 입력을 "
                      "직접 받습니다.")
 
-        ok = []
-        for hid, vk, name in ((HOTKEY_RECORD, VK_F6, "F6"),
-                              (HOTKEY_PLAY, VK_F7, "F7"),
-                              (HOTKEY_STOP, VK_F8, "F8")):
-            if user32.RegisterHotKey(self.hwnd, hid, 0, vk):
-                ok.append(name)
-        if len(ok) < 3:
-            self.log("일부 단축키를 다른 프로그램이 쓰고 있습니다. 사용 가능: "
-                     + (", ".join(ok) if ok else "없음"))
+        self._register_hotkeys()
 
         msg = MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
+
+    def _register_hotkeys(self):
+        """지금 설정된 단축키를 Windows 에 등록한다. 리스너 스레드에서 부른다."""
+        if not self.hwnd:
+            return
+        for _key, hid, _label in ACTIONS:
+            user32.UnregisterHotKey(self.hwnd, hid)
+        self.hotkey_vks = set()
+        ok, bad = [], []
+        for key, hid, label in ACTIONS:
+            entry = self.hotkeys.get(key) or DEFAULT_HOTKEYS[key]
+            vk = KEY_CODES.get(entry[0])
+            shown = "{} {}".format(label, hotkey_text(entry))
+            if vk is None:
+                bad.append(shown)
+                continue
+            mods = int(entry[1]) | MOD_NOREPEAT
+            if user32.RegisterHotKey(self.hwnd, hid, mods, vk):
+                ok.append(shown)
+                self.hotkey_vks.add(vk)
+            else:
+                bad.append(shown)
+        if ok:
+            self.log("단축키 · " + " · ".join(ok))
+        if bad:
+            self.log("단축키 등록 실패 (다른 프로그램이 쓰는 중): "
+                     + ", ".join(bad))
+
+    def apply_hotkeys(self):
+        """창에서 바꾼 단축키를 리스너 스레드에 넘겨 다시 등록시킨다."""
+        if self.hwnd:
+            user32.PostMessageW(self.hwnd, WM_APP_REHOTKEY, 0, 0)
 
     def _on_hotkey(self, hid):
         if hid == HOTKEY_RECORD:
@@ -1112,8 +1200,8 @@ class App:
         self.root = root
         self.eng = engine
         root.title(APP_NAME)
-        root.geometry("540x880")
-        root.minsize(480, 640)
+        root.geometry("560x910")
+        root.minsize(500, 660)
 
         pad = {"padx": 10, "pady": 4}
         top = ttk.Frame(root, padding=10)
@@ -1131,9 +1219,9 @@ class App:
 
         btns = ttk.Frame(root, padding=(10, 6))
         btns.pack(fill="x")
-        self.b_rec = ttk.Button(btns, text="● 녹화  (F6)", command=self.toggle_record)
-        self.b_play = ttk.Button(btns, text="▶ 재생  (F7)", command=self.toggle_play)
-        self.b_stop = ttk.Button(btns, text="■ 정지  (F8)", command=self.stop_all)
+        self.b_rec = ttk.Button(btns, text="● 녹화", command=self.toggle_record)
+        self.b_play = ttk.Button(btns, text="▶ 재생", command=self.toggle_play)
+        self.b_stop = ttk.Button(btns, text="■ 정지", command=self.stop_all)
         for b in (self.b_rec, self.b_play, self.b_stop):
             b.pack(side="left", expand=True, fill="x", padx=3)
 
@@ -1167,6 +1255,30 @@ class App:
                         variable=self.v_goto).pack(anchor="w", pady=2)
         ttk.Checkbutton(opt, text="정밀 모드 (재생 중 마우스 가속 끔, 끝나면 자동 복구)",
                         variable=self.v_prec).pack(anchor="w", pady=2)
+
+        hk = ttk.LabelFrame(root, text="단축키", padding=10)
+        hk.pack(fill="x", **pad)
+        self.hk_key = {}
+        self.hk_mod = {}
+        for row, (key, _hid, label) in enumerate(ACTIONS):
+            ttk.Label(hk, text=label).grid(row=row, column=0, sticky="w",
+                                           padx=(0, 8), pady=2)
+            var = tk.StringVar()
+            box = ttk.Combobox(hk, textvariable=var, values=KEY_NAMES,
+                               width=12, state="readonly")
+            box.grid(row=row, column=1, pady=2)
+            self.hk_key[key] = var
+            mods = {}
+            for col, (name, bit) in enumerate((("Ctrl", MOD_CONTROL),
+                                               ("Alt", MOD_ALT),
+                                               ("Shift", MOD_SHIFT))):
+                v = tk.BooleanVar()
+                ttk.Checkbutton(hk, text=name, variable=v).grid(
+                    row=row, column=2 + col, padx=4)
+                mods[bit] = v
+            self.hk_mod[key] = mods
+        ttk.Button(hk, text="단축키 적용", command=self.apply_hotkeys).grid(
+            row=len(ACTIONS), column=0, columnspan=5, sticky="ew", pady=(8, 0))
 
         fio = ttk.Frame(root, padding=(10, 2))
         fio.pack(fill="x")
@@ -1202,7 +1314,7 @@ class App:
         logf.pack(fill="both", expand=True, **pad)
         bar = ttk.Scrollbar(logf, orient="vertical")
         bar.pack(side="right", fill="y")
-        self.log = tk.Text(logf, height=16, wrap="word", state="disabled",
+        self.log = tk.Text(logf, height=10, wrap="word", state="disabled",
                            bg="#1e1e1e", fg="#d4d4d4", relief="flat",
                            yscrollcommand=bar.set)
         self.log.pack(side="left", fill="both", expand=True)
@@ -1223,7 +1335,7 @@ class App:
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.pump()
-        self.eng.log("F6 녹화 시작/중지 · F7 재생 시작/중지 · F8 모두 정지")
+        self.load_saved()
 
     def sync_opts(self):
         self.eng.record_keyboard = self.v_kbd.get()
@@ -1270,6 +1382,75 @@ class App:
                 self.eng.load(p)
             except Exception as e:
                 messagebox.showerror(APP_NAME, "불러오기 실패: {}".format(e))
+
+    # ---------- 설정 기억하기
+    def collect(self):
+        """지금 창에 있는 값을 모아 저장할 모양으로 만든다."""
+        hk = {}
+        for key, _hid, _label in ACTIONS:
+            mods = 0
+            for bit, var in self.hk_mod[key].items():
+                if var.get():
+                    mods |= bit
+            name = self.hk_key[key].get() or self.eng.hotkeys[key][0]
+            hk[key] = [name, mods]
+        return {"hotkeys": hk,
+                "repeat": self.repeat.get(),
+                "speed": self.speed.get(),
+                "gap": self.gap.get(),
+                "pico_port": self.port_var.get(),
+                "keyboard": bool(self.v_kbd.get()),
+                "goto_start": bool(self.v_goto.get()),
+                "precise": bool(self.v_prec.get())}
+
+    def load_saved(self):
+        """지난번에 쓰던 값을 창에 채워 넣는다."""
+        cfg = load_settings()
+        saved = cfg.get("hotkeys") or {}
+        for key, _hid, _label in ACTIONS:
+            entry = saved.get(key)
+            if (isinstance(entry, list) and len(entry) == 2
+                    and entry[0] in KEY_CODES):
+                self.eng.hotkeys[key] = [entry[0], int(entry[1])]
+            cur = self.eng.hotkeys[key]
+            self.hk_key[key].set(cur[0])
+            for bit, var in self.hk_mod[key].items():
+                var.set(bool(int(cur[1]) & bit))
+
+        for name, var in (("repeat", self.repeat), ("speed", self.speed),
+                          ("gap", self.gap), ("pico_port", self.port_var)):
+            value = cfg.get(name)
+            if isinstance(value, str) and value:
+                var.set(value)
+        for name, var in (("keyboard", self.v_kbd), ("goto_start", self.v_goto),
+                          ("precise", self.v_prec)):
+            if isinstance(cfg.get(name), bool):
+                var.set(cfg[name])
+        self.sync_opts()
+
+        if cfg:
+            self.eng.log("지난번 설정을 불러왔습니다.")
+        # 리스너가 창을 다 만든 뒤에 단축키를 다시 걸어야 한다
+        self.root.after(400, self.eng.apply_hotkeys)
+
+    def save_now(self, quiet=False):
+        ok = save_settings(self.collect())
+        if quiet:
+            return ok
+        self.eng.log("설정을 저장했습니다." if ok else
+                     "설정 저장 실패. 폴더에 쓸 수 있는지 확인하세요.")
+        return ok
+
+    def apply_hotkeys(self):
+        cfg = self.collect()["hotkeys"]
+        combos = [(v[0], v[1]) for v in cfg.values()]
+        if len(set(combos)) < len(combos):
+            self.eng.log("같은 단축키를 두 군데에 넣었습니다. 서로 다르게 "
+                         "골라 주세요.")
+            return
+        self.eng.hotkeys = dict((k, list(v)) for k, v in cfg.items())
+        self.eng.apply_hotkeys()
+        self.save_now()
 
     def refresh_ports(self):
         ports = list_com_ports()
@@ -1359,17 +1540,19 @@ class App:
             self.log.see("end")
             self.log.configure(state="disabled")
 
+        rec_k = hotkey_text(self.eng.hotkeys["record"])
+        play_k = hotkey_text(self.eng.hotkeys["play"])
+        stop_k = hotkey_text(self.eng.hotkeys["stop"])
         if self.eng.recording:
             self.status.set("● 녹화 중…")
-            self.b_rec.configure(text="● 녹화 중지 (F6)")
-        elif self.eng.playing:
-            self.status.set("▶ 재생 중…")
-            self.b_rec.configure(text="● 녹화  (F6)")
+            self.b_rec.configure(text="● 녹화 중지  ({})".format(rec_k))
         else:
-            self.status.set("대기 중")
-            self.b_rec.configure(text="● 녹화  (F6)")
-        self.b_play.configure(text="■ 재생 중지 (F7)" if self.eng.playing
-                              else "▶ 재생  (F7)")
+            self.status.set("▶ 재생 중…" if self.eng.playing else "대기 중")
+            self.b_rec.configure(text="● 녹화  ({})".format(rec_k))
+        self.b_play.configure(
+            text=("■ 재생 중지  ({})" if self.eng.playing
+                  else "▶ 재생  ({})").format(play_k))
+        self.b_stop.configure(text="■ 정지  ({})".format(stop_k))
         n = len(self.eng.events)
         self.info.set("기록 없음" if n == 0 else
                       "이벤트 {}개 · 길이 {:.2f}초".format(n, self.eng.duration()))
@@ -1397,6 +1580,7 @@ class App:
                 .format(self.eng.inj_packets, self.eng.inj_hdevice))
 
     def on_close(self):
+        self.save_now(quiet=True)
         self.eng.shutdown()
         self.root.after(120, self.root.destroy)
 

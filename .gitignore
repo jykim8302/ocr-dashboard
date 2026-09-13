@@ -10,3 +10,4 @@ final_output.zip
 .ipynb_checkpoints/
 *.log
 .gemini/
+mouse-tracer/mouse_tracer_settings.json
