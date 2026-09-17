@@ -568,7 +568,7 @@ class Engine:
         self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
-        self._pico_kbd_warned = False
+        self._pico_warned = set()   # 같은 안내를 두 번 하지 않으려고
         self._buf = (ctypes.c_ubyte * 65536)()
 
     # ---------- 로그
@@ -588,7 +588,8 @@ class Engine:
             self.start_pos = (pt.x, pt.y)
             self._t0 = time.perf_counter()
             self.recording = True
-        self.log("녹화 시작. 마우스를 움직이세요. (F6 = 중지)")
+        self.log("녹화 시작. 마우스를 움직이세요. ({} = 중지)".format(
+            hotkey_text(self.hotkeys["record"])))
 
     def stop_record(self):
         if not self.recording:
@@ -825,6 +826,13 @@ class Engine:
     def shutdown(self):
         self.recording = False
         self.stop_play()
+        # 재생 스레드가 눌린 버튼을 놓을 때까지 기다린다. 먼저 포트를 닫으면
+        # 피코가 버튼을 누른 채로 남아 프로그램을 끈 뒤에도 계속 눌려 있다.
+        thread = self._play_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.5)
+        if self.pico.handle:
+            self.pico.write(pico_frames(0, 0, 0, 0))   # 버튼 모두 놓기
         self.pico.close()
         if self.hwnd:
             for hid in (HOTKEY_RECORD, HOTKEY_PLAY, HOTKEY_STOP):
@@ -842,6 +850,12 @@ class Engine:
             else:
                 user32.keybd_event(0, i.ki.wScan & 0xFF, i.ki.dwFlags,
                                    SIGNATURE)
+
+    def _warn_pico_once(self, kind, message):
+        """같은 안내를 재생 한 번에 한 번만 로그에 남긴다."""
+        if kind not in self._pico_warned:
+            self._pico_warned.add(kind)
+            self.log(message)
 
     def _pico_flush(self):
         """모아 둔 이동량을 피코로 한 번에 보낸다."""
@@ -867,15 +881,27 @@ class Engine:
         now_urgent = False
         for i in batch:
             if i.type != INPUT_MOUSE:
-                # 피코는 마우스로만 동작해서 키보드는 보낼 수 없다.
-                # 조용히 사라지면 헷갈리니 한 번은 알려 준다.
-                if not self._pico_kbd_warned:
-                    self._pico_kbd_warned = True
-                    self.log("피코 재생 중에는 키보드 입력이 빠집니다. "
-                             "마우스만 나갑니다.")
+                # 피코는 마우스로만 동작해서 키보드는 보낼 수 없다
+                self._warn_pico_once(
+                    "keyboard",
+                    "피코 재생 중에는 키보드 입력이 빠집니다. 마우스만 나갑니다.")
                 continue
+
             fl = i.mi.dwFlags
-            before = self.pico_btn
+
+            if fl & MOUSEEVENTF_ABSOLUTE:
+                # 태블릿이나 원격 데스크톱으로 녹화하면 화면 절대좌표가 들어온다.
+                # 피코는 상대 이동만 낼 수 있어서, 이 값을 이동량으로 쓰면
+                # 커서가 화면 밖으로 튄다. 그래서 건너뛴다.
+                self._warn_pico_once(
+                    "absolute",
+                    "이 기록은 화면 절대좌표로 저장돼 있어 피코로는 재생할 수 "
+                    "없습니다. 피코 사용을 끄고 재생하세요.")
+                continue
+
+            # 버튼이 바뀌기 직전에 여태 모은 이동을 예전 버튼 상태로 먼저
+            # 내보낸다. 그래야 클릭이 제 위치에서 일어난다.
+            new_btn = self.pico_btn
             for flag, bit, press in ((MOUSEEVENTF_LEFTDOWN, 0x01, True),
                                      (MOUSEEVENTF_LEFTUP, 0x01, False),
                                      (MOUSEEVENTF_RIGHTDOWN, 0x02, True),
@@ -883,10 +909,12 @@ class Engine:
                                      (MOUSEEVENTF_MIDDLEDOWN, 0x04, True),
                                      (MOUSEEVENTF_MIDDLEUP, 0x04, False)):
                 if fl & flag:
-                    if press:
-                        self.pico_btn |= bit
-                    else:
-                        self.pico_btn &= ~bit
+                    new_btn = (new_btn | bit) if press else (new_btn & ~bit)
+            if new_btn != self.pico_btn:
+                self._pico_flush()
+                self.pico_btn = new_btn
+                now_urgent = True
+
             if fl & MOUSEEVENTF_MOVE:
                 self._pico_dx += int(i.mi.dx)
                 self._pico_dy += int(i.mi.dy)
@@ -894,8 +922,9 @@ class Engine:
                 # 한 칸(120)이 안 되는 양도 버리지 않고 모아 둔다
                 self._pico_wheel += int(ctypes.c_int32(i.mi.mouseData).value)
                 now_urgent = True
-            if self.pico_btn != before:
-                now_urgent = True
+            if fl & MOUSEEVENTF_HWHEEL:
+                self._warn_pico_once(
+                    "hwheel", "피코 재생 중에는 가로 휠이 빠집니다.")
 
         if now_urgent or (time.perf_counter() - self._pico_flush_t) >= 0.004:
             self._pico_flush()
@@ -1100,7 +1129,8 @@ class Engine:
         if self.playing:
             return
         if not self.events:
-            self.log("재생할 기록이 없습니다. 먼저 F9로 녹화하세요.")
+            self.log("재생할 기록이 없습니다. 먼저 {} 로 녹화하세요.".format(
+                hotkey_text(self.hotkeys["record"])))
             return
         self._stop_play.clear()
         self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
@@ -1110,7 +1140,7 @@ class Engine:
         self._pico_dx = self._pico_dy = self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
-        self._pico_kbd_warned = False
+        self._pico_warned = set()   # 같은 안내를 두 번 하지 않으려고
         self.playing = True
         self._play_thread = threading.Thread(
             target=self._play_worker,
@@ -1146,8 +1176,10 @@ class Engine:
                 self._disable_accel()
             total = repeat if repeat > 0 else -1
             count = 0
-            self.log("재생 시작 ({}회, {}배속). 정지는 F7 또는 F8".format(
-                "무한" if repeat <= 0 else repeat, speed))
+            self.log("재생 시작 ({}회, {}배속). 정지는 {} 또는 {}".format(
+                "무한" if repeat <= 0 else repeat, speed,
+                hotkey_text(self.hotkeys["play"]),
+                hotkey_text(self.hotkeys["stop"])))
             while total < 0 or count < total:
                 if self._stop_play.is_set():
                     break
@@ -1453,7 +1485,19 @@ class App:
                 "precise": bool(self.v_prec.get())}
 
     def load_saved(self):
-        """지난번에 쓰던 값을 창에 채워 넣는다."""
+        """지난번에 쓰던 값을 창에 채워 넣는다.
+
+        설정 파일이 어떻게 망가져 있어도 창은 떠야 한다. pythonw 로 띄우면
+        시작하다 죽어도 아무 표시가 없어서 원인을 알 수 없다.
+        """
+        try:
+            self._load_saved()
+        except Exception as e:
+            self.eng.log("설정을 불러오지 못해 기본값으로 시작합니다: "
+                         "{}".format(e))
+            self.root.after(400, self.eng.apply_hotkeys)
+
+    def _load_saved(self):
         cfg = load_settings()
         saved = cfg.get("hotkeys")
         if not isinstance(saved, dict):
@@ -1461,7 +1505,10 @@ class App:
         for key, _hid, _label in ACTIONS:
             entry = saved.get(key)
             if (isinstance(entry, list) and len(entry) == 2
-                    and entry[0] in KEY_CODES):
+                    and entry[0] in KEY_CODES
+                    and isinstance(entry[1], int)
+                    and not isinstance(entry[1], bool)
+                    and 0 <= entry[1] <= MOD_CONTROL | MOD_ALT | MOD_SHIFT):
                 self.eng.hotkeys[key] = [entry[0], int(entry[1])]
             cur = self.eng.hotkeys[key]
             self.hk_key[key].set(cur[0])
@@ -1526,6 +1573,11 @@ class App:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
         else:
+            if self.eng.playing:
+                self.v_pico.set(True)
+                self.eng.log("재생 중에는 피코 연결을 끊을 수 없습니다. "
+                             "먼저 정지하세요.")
+                return
             self.eng.use_pico = False
             self.eng.pico.close()
             self.eng.log("피코 연결을 끊었습니다.")

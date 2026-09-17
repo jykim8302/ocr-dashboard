@@ -128,24 +128,92 @@ check("전송량 줄어듦", len(frames) < 400, "%d묶음 (원본 1002건)" % le
 check("모든 값 범위 안", all(-127 <= (f[1]-256 if f[1]>127 else f[1]) <= 127 for f in frames), "")
 
 print()
-print("=== 8. 피코 펌웨어 누적 로직 ===")
-def firmware(frames_in):
-    px = py = 0; out = []
-    def flush():
-        nonlocal px, py
-        while px or py:
-            cx = 127 if px > 127 else (-127 if px < -127 else px)
-            cy = 127 if py > 127 else (-127 if py < -127 else py)
-            px -= cx; py -= cy; out.append((cx, cy))
-    for dx, dy in frames_in:
-        px += dx; py += dy
-    flush(); return out
+print("=== 8. 피코 펌웨어 (pico/code.py 를 실제로 돌린다) ===")
+
+class _Stop(Exception):
+    """프레임을 다 먹인 뒤 펌웨어의 무한 루프를 빠져나오기 위한 신호."""
+
+
+def run_firmware(frame_bytes):
+    """pico/code.py 를 그대로 불러들여 프레임을 먹이고 무엇을 냈는지 본다."""
+    moves, buttons = [], []
+
+    class FakeMouse:
+        LEFT_BUTTON, RIGHT_BUTTON, MIDDLE_BUTTON = 1, 2, 4
+        def __init__(self, devices): pass
+        def move(self, x=0, y=0, wheel=0): moves.append((x, y, wheel))
+        # 버튼 사건에 그때까지 나간 이동 횟수를 같이 적어 순서를 확인한다
+        def press(self, code): buttons.append(("press", code, len(moves)))
+        def release(self, code): buttons.append(("release", code, len(moves)))
+
+    class FakePort:
+        def __init__(self, data): self.data = bytearray(data)
+        @property
+        def in_waiting(self):
+            if not self.data:
+                raise _Stop()
+            return len(self.data)
+        def read(self, n):
+            out = bytes(self.data[:n]); del self.data[:n]; return out
+
+    usb_cdc = types.ModuleType("usb_cdc"); usb_cdc.data = FakePort(frame_bytes)
+    usb_hid = types.ModuleType("usb_hid"); usb_hid.devices = []
+    pkg = types.ModuleType("adafruit_hid")
+    mouse_mod = types.ModuleType("adafruit_hid.mouse")
+    mouse_mod.Mouse = FakeMouse
+    pkg.mouse = mouse_mod
+    names = ("usb_cdc", "usb_hid", "adafruit_hid", "adafruit_hid.mouse")
+    saved = dict((n, sys.modules.get(n)) for n in names)
+    sys.modules.update({"usb_cdc": usb_cdc, "usb_hid": usb_hid,
+                        "adafruit_hid": pkg, "adafruit_hid.mouse": mouse_mod})
+    try:
+        fw_spec = importlib.util.spec_from_file_location(
+            "pico_code", os.path.join(ROOT, "pico", "code.py"))
+        fw = importlib.util.module_from_spec(fw_spec)
+        try:
+            fw_spec.loader.exec_module(fw)
+        except _Stop:
+            pass
+    finally:
+        for n, old in saved.items():
+            if old is None:
+                sys.modules.pop(n, None)
+            else:
+                sys.modules[n] = old
+    return moves, buttons
+
+
+# 8-1) 큰 이동량을 먹여도 총합이 보존되고 한 번에 127 을 넘지 않는다
 random.seed(5)
-fin = [(random.randint(-127,127), random.randint(-127,127)) for _ in range(800)]
-want = (sum(f[0] for f in fin), sum(f[1] for f in fin))
-out = firmware(fin)
-check("펌웨어도 총량 보존", (sum(o[0] for o in out), sum(o[1] for o in out)) == want,
-      "%s -> %s" % (want, (sum(o[0] for o in out), sum(o[1] for o in out))))
+pairs = [(random.randint(-400, 400), random.randint(-400, 400)) for _ in range(60)]
+data = b"".join(mt.pico_frames(dx, dy, 0, 0) for dx, dy in pairs)
+moves, buttons = run_firmware(data)
+want = (sum(a for a, _b in pairs), sum(b for _a, b in pairs))
+got = (sum(m[0] for m in moves), sum(m[1] for m in moves))
+check("펌웨어 총 이동량 보존", got == want, "%s -> %s" % (want, got))
+check("한 보고가 127 을 안 넘음",
+      all(-127 <= m[0] <= 127 and -127 <= m[1] <= 127 for m in moves), "")
+
+# 8-2) 휠도 그대로 전달된다
+moves, buttons = run_firmware(mt.pico_frames(0, 0, 0, 3)
+                              + mt.pico_frames(0, 0, 0, -1))
+check("펌웨어 휠 전달", sum(m[2] for m in moves) == 2,
+      "%d칸" % sum(m[2] for m in moves))
+
+# 8-3) 버튼은 모아 둔 이동을 먼저 내보낸 뒤에 눌린다
+data = (mt.pico_frames(30, 0, 0, 0) + mt.pico_frames(20, 0, 0, 0)
+        + mt.pico_frames(0, 0, 0x01, 0) + mt.pico_frames(0, 0, 0, 0))
+moves, buttons = run_firmware(data)
+presses = [b for b in buttons if b[0] == "press"]
+check("이동을 먼저 내보낸 뒤 누름",
+      bool(presses) and presses[0][2] >= 1 and moves[0] == (50, 0, 0),
+      "이동=%s 버튼=%s" % (moves[:2], buttons))
+check("누른 뒤 놓기까지", [b[0] for b in buttons] == ["press", "release"],
+      str([b[0] for b in buttons]))
+
+# 8-4) 앞에 쓰레기 바이트가 섞여도 다시 맞춰 읽는다
+moves, buttons = run_firmware(b"\x00\x11\x22" + mt.pico_frames(7, -5, 0, 0))
+check("깨진 앞부분 건너뛰고 복구", moves and moves[0] == (7, -5, 0), str(moves[:1]))
 
 print()
 print("=== 9. 단축키 ===")
@@ -264,7 +332,7 @@ class V:
     def get(s): return s.v
 class R:
     def after(s, ms, fn): pass
-fa = type("FakeApp", (), {})()
+fa = mt.App.__new__(mt.App)   # __init__ 없이 껍데기만 (tk 없이 검사하려고)
 fa.eng = mt.Engine()
 fa.hk_key = dict((k, V()) for k, _h, _l in mt.ACTIONS)
 fa.hk_mod = dict((k, dict((b, V()) for b in (mt.MOD_CONTROL, mt.MOD_ALT, mt.MOD_SHIFT)))
@@ -297,6 +365,108 @@ e11._pico_flush()
 notches = sum((f - 256 if f > 127 else f) for f in
               [buf2[i + 4] for i in range(0, len(buf2), 5)])
 check("휠 40씩 3번 = 1칸", notches == 1, "%d칸" % notches)
+
+
+print()
+print("=== 13. 전체 검토에서 나온 것들 (재발 방지) ===")
+
+def pico_engine():
+    out = bytearray()
+    class L:
+        handle = 1
+        def write(self, dd): out.extend(dd); return True
+        def close(self): pass
+    en = mt.Engine(); en.pico = L(); en.use_pico = True
+    return en, out
+
+def frames_of(out):
+    return [out[i:i + 5] for i in range(0, len(out), 5)]
+
+def as_signed(v):
+    return v - 256 if v > 127 else v
+
+# 13-1) 화면 절대좌표 기록은 피코로 내보내지 않는다
+en, out = pico_engine()
+en._emit([mt.mouse_input(32000, 16000, 0,
+                         mt.MOUSEEVENTF_MOVE | mt.MOUSEEVENTF_ABSOLUTE)])
+en._pico_flush()
+logs = []
+while not en.log_q.empty(): logs.append(en.log_q.get())
+check("절대좌표는 피코로 안 보냄", len(out) == 0, "%d바이트 보냄" % len(out))
+check("절대좌표일 때 안내함", any("절대좌표" in l for l in logs), str(logs))
+
+# 13-2) 가로 휠은 조용히 사라지지 않고 알려 준다
+en, out = pico_engine()
+en._emit([mt.mouse_input(0, 0, 120, mt.MOUSEEVENTF_HWHEEL)])
+logs = []
+while not en.log_q.empty(): logs.append(en.log_q.get())
+check("가로 휠 빠질 때 안내함", any("가로 휠" in l for l in logs), str(logs))
+
+# 13-3) 버튼은 모아 둔 이동과 같은 묶음에 실리지 않는다
+en, out = pico_engine()
+en._emit([mt.mouse_input(30, 0, 0, mt.MOUSEEVENTF_MOVE)])
+en._emit([mt.mouse_input(20, 0, 0, mt.MOUSEEVENTF_MOVE)])
+en._emit([mt.mouse_input(0, 0, 0, mt.MOUSEEVENTF_LEFTDOWN)])
+en._pico_flush()
+fr = frames_of(out)
+first_press = next((k for k, f in enumerate(fr) if f[3] == 1), None)
+moved_before = sum(as_signed(f[1]) for f in fr[:first_press]) if first_press is not None else 0
+check("누름 전에 이동 50 이 먼저 나감",
+      first_press is not None and moved_before == 50,
+      "묶음=%s" % [(as_signed(f[1]), f[3]) for f in fr])
+check("누름 묶음에는 이동이 없음",
+      first_press is not None and as_signed(fr[first_press][1]) == 0,
+      str(bytes(fr[first_press]) if first_press is not None else None))
+
+# 13-4) 끌 때 재생 스레드를 기다리고 버튼을 놓아 준다
+en, out = pico_engine()
+en.pico_btn = 0x01          # 왼쪽이 눌려 있는 상태
+en._play_thread = None
+en.shutdown()
+fr = frames_of(out)
+check("끄기 전에 버튼 놓기 신호 보냄",
+      bool(fr) and fr[-1][3] == 0, str([bytes(f) for f in fr]))
+
+# 13-5) 설정의 조합키 값이 엉뚱해도 기본값으로 시작한다
+for broken in ({"hotkeys": {"record": ["F6", "Ctrl"]}},
+               {"hotkeys": {"record": ["F6", True]}},
+               {"hotkeys": {"record": ["F6", 999]}},
+               {"hotkeys": "F6"},
+               {"hotkeys": {"record": "F6"}}):
+    fb = mt.App.__new__(mt.App)
+    fb.eng = mt.Engine()
+    fb.hk_key = dict((k, V()) for k, _h, _l in mt.ACTIONS)
+    fb.hk_mod = dict((k, dict((b, V()) for b in (mt.MOD_CONTROL, mt.MOD_ALT,
+                                                 mt.MOD_SHIFT)))
+                     for k, _h, _l in mt.ACTIONS)
+    for n in ("repeat", "speed", "gap", "port_var", "v_kbd", "v_goto", "v_prec"):
+        setattr(fb, n, V())
+    fb.sync_opts = lambda: None
+    fb.root = R()
+    bp = os.path.join(d, "b.json")
+    _json.dump(broken, open(bp, "w"))
+    mt.SETTINGS_FILE = bp
+    fb.load_saved()
+    check("망가진 설정 %s -> 기본값" % str(broken)[:34],
+          fb.hk_key["record"].v == "F6", str(fb.hk_key["record"].v))
+
+# 13-6) 안내 문구가 바꾼 단축키를 따라간다
+en = mt.Engine()
+en.hotkeys = {"record": ["F2", mt.MOD_CONTROL], "play": ["F3", 0],
+              "stop": ["F4", 0]}
+mt.send = lambda b: len(b)
+en.start_record(); en.stop_record()
+en.start_play(repeat=1, speed=1.0, goto_start=False, precise=False, gap=0)
+en.events = [["m", 0.0, 1, 0, 0, 0, 0]]
+en._play_worker(1, 1.0, False, False, 0)
+logs = []
+while not en.log_q.empty(): logs.append(en.log_q.get())
+joined = " ".join(logs)
+check("녹화 안내가 설정을 따라감", "Ctrl+F2 = 중지" in joined, joined[:110])
+check("기록 없음 안내도 설정을 따라감", "Ctrl+F2 로 녹화" in joined, joined[:160])
+check("재생 안내가 설정을 따라감", "정지는 F3 또는 F4" in joined, joined[:200])
+check("옛 단축키가 남아 있지 않음",
+      not any(x in joined for x in ("F6", "F7", "F8", "F9")), joined[:200])
 
 print()
 print("=" * 52)
