@@ -598,7 +598,9 @@ class Engine:
             len(self.events), self.duration()))
 
     def duration(self):
-        return self.events[-1][1] if self.events else 0.0
+        # 녹화 중에는 다른 스레드가 목록을 갈아치울 수 있으니 한 번만 읽는다
+        events = self.events
+        return events[-1][1] if events else 0.0
 
     # ---------- 원시 입력 처리 (Raw Input)
     def _device_name(self, handle):
@@ -844,8 +846,10 @@ class Engine:
     def _pico_flush(self):
         """모아 둔 이동량을 피코로 한 번에 보낸다."""
         dx, dy = self._pico_dx, self._pico_dy
-        wheel = self._pico_wheel
-        self._pico_dx = self._pico_dy = self._pico_wheel = 0
+        # 휠은 120 단위가 한 칸이다. 모자란 나머지는 다음에 이어서 쓴다.
+        wheel = int(self._pico_wheel / 120)
+        self._pico_dx = self._pico_dy = 0
+        self._pico_wheel -= wheel * 120
         self._pico_flush_t = time.perf_counter()
         if not (dx or dy or wheel or self.pico_btn != self._pico_sent_btn):
             return
@@ -887,7 +891,8 @@ class Engine:
                 self._pico_dx += int(i.mi.dx)
                 self._pico_dy += int(i.mi.dy)
             if fl & MOUSEEVENTF_WHEEL:
-                self._pico_wheel += int(ctypes.c_int32(i.mi.mouseData).value / 120)
+                # 한 칸(120)이 안 되는 양도 버리지 않고 모아 둔다
+                self._pico_wheel += int(ctypes.c_int32(i.mi.mouseData).value)
                 now_urgent = True
             if self.pico_btn != before:
                 now_urgent = True
@@ -1049,11 +1054,19 @@ class Engine:
 
     # ---------- 마우스 가속 임시 해제 (재생 후 원래대로 복구)
     def _disable_accel(self):
+        self._saved_mouse = None
         try:
             params = (ctypes.c_int * 3)()
-            user32.SystemParametersInfoW(SPI_GETMOUSE, 0, ctypes.byref(params), 0)
+            got_accel = user32.SystemParametersInfoW(
+                SPI_GETMOUSE, 0, ctypes.byref(params), 0)
             speed = ctypes.c_int()
-            user32.SystemParametersInfoW(SPI_GETMOUSESPEED, 0, ctypes.byref(speed), 0)
+            got_speed = user32.SystemParametersInfoW(
+                SPI_GETMOUSESPEED, 0, ctypes.byref(speed), 0)
+            # 지금 값을 못 읽었으면 아무것도 건드리지 않는다. 엉뚱한 값을
+            # 적어 두면 나중에 되돌릴 때 마우스 설정이 망가진다.
+            if not got_accel or not got_speed or not 1 <= speed.value <= 20:
+                self.log("정밀 모드: 지금 마우스 설정을 읽지 못해 건너뜁니다.")
+                return
             self._saved_mouse = ([params[0], params[1], params[2]], speed.value)
             flat = (ctypes.c_int * 3)(0, 0, 0)
             user32.SystemParametersInfoW(SPI_SETMOUSE, 0, ctypes.byref(flat), SPIF_SENDCHANGE)
@@ -1068,6 +1081,8 @@ class Engine:
             return
         p, speed = self._saved_mouse
         self._saved_mouse = None
+        if not 1 <= speed <= 20:
+            return   # 이상한 값이면 건드리지 않는다
         try:
             old = (ctypes.c_int * 3)(p[0], p[1], p[2])
             user32.SystemParametersInfoW(SPI_SETMOUSE, 0, ctypes.byref(old), SPIF_SENDCHANGE)
@@ -1213,7 +1228,7 @@ class Engine:
                 "created": datetime.datetime.now().isoformat(timespec="seconds"),
                 "start_pos": self.start_pos,
                 "duration": self.duration(),
-                "events": self.events}
+                "events": list(self.events)}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         self.log("저장 완료: {}".format(os.path.basename(path)))
@@ -1440,7 +1455,9 @@ class App:
     def load_saved(self):
         """지난번에 쓰던 값을 창에 채워 넣는다."""
         cfg = load_settings()
-        saved = cfg.get("hotkeys") or {}
+        saved = cfg.get("hotkeys")
+        if not isinstance(saved, dict):
+            saved = {}   # 손으로 고쳐 망가진 파일도 그냥 넘긴다
         for key, _hid, _label in ACTIONS:
             entry = saved.get(key)
             if (isinstance(entry, list) and len(entry) == 2
