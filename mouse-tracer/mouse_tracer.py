@@ -383,10 +383,44 @@ def _open_com(name):
     return h
 
 
+def _com_number(name):
+    """COM10 이 COM9 보다 뒤에 오도록 번호를 뽑는다."""
+    digits = "".join(c for c in name if c.isdigit())
+    return int(digits) if digits else 0
+
+
 def list_com_ports():
-    """지금 쓸 수 있는 COM 포트 목록을 만든다."""
+    """지금 있는 COM 포트 목록을 만든다.
+
+    레지스트리에 이미 적혀 있는 목록을 읽는다. 포트를 하나씩 열어 보는
+    방식은 블루투스 시리얼처럼 여는 것만으로 연결을 시도하거나 보드를
+    다시 켜는 장치를 건드릴 수 있어서 쓰지 않는다.
+    """
     found = []
-    for i in range(1, 65):
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"HARDWARE\DEVICEMAP\SERIALCOMM")
+        try:
+            index = 0
+            while True:
+                try:
+                    _name, value, _kind = winreg.EnumValue(key, index)
+                except OSError:
+                    break
+                if isinstance(value, str) and value.upper().startswith("COM"):
+                    found.append(value)
+                index += 1
+        finally:
+            winreg.CloseKey(key)
+    except Exception:
+        pass
+
+    if found:
+        return sorted(set(found), key=_com_number)
+
+    # 레지스트리를 못 읽는 드문 경우에만 직접 열어 본다
+    for i in range(1, 33):
         name = "COM{}".format(i)
         ctypes.set_last_error(0)
         h = _open_com(name)
@@ -1482,6 +1516,9 @@ class App:
     def test_pico(self):
         if not self.eng.pico.handle:
             self.eng.log("먼저 피코 사용 을 켜서 연결하세요.")
+            return
+        if self.eng.playing or self.eng.recording:
+            self.eng.log("녹화나 재생 중에는 연결 시험을 할 수 없습니다.")
             return
         threading.Thread(target=self._test_pico_worker, daemon=True).start()
 
