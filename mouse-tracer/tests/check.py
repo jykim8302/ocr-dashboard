@@ -618,6 +618,78 @@ try:
 finally:
     mt.IS_WOW64 = saved_flag
 
+
+print()
+print("=== 13. 네 번째 전체 검토에서 나온 것들 (재발 방지) ===")
+
+# 13-1) 커서 움직임 판정: 한쪽으로 보낸 뒤에 재야 잡힌다
+pos = {"x": 500, "y": 500}
+def fake_getpos(ptr):
+    pt = ctypes.cast(ptr, ctypes.POINTER(mt.POINT)).contents
+    pt.x, pt.y = pos["x"], pos["y"]
+mt.user32.GetCursorPos = fake_getpos
+em = mt.Engine()
+def moving(step):
+    pos["x"] += step      # 실제로 움직이는 입력을 흉내
+    return True
+res = em._try_method("움직이는 방식", moving, shots=3)
+check("움직이면 움직였다고 판정", res["moved"], str(res))
+check("검사 뒤 커서는 제자리", pos["x"] == 500, "x=%d" % pos["x"])
+pos["x"] = 500
+res2 = em._try_method("막힌 방식", lambda step: False, shots=3)
+check("안 움직이면 없다고 판정", not res2["moved"], str(res2))
+
+# 13-2) 보내기가 성공했다고 답하면 들어간 것으로 본다
+em2 = mt.Engine()
+rows = [{"name": "a", "ok": 6, "total": 6, "err": 0, "moved": False,
+         "arrived": 0, "inj": 0, "verified": True}]
+worked = [r for r in rows if r["moved"] or (r["verified"] and r["ok"] > 0)]
+check("커서가 안 잡혀도 성공 횟수로 인정", len(worked) == 1, str(worked))
+
+# 13-3) 피코 보내기가 실패해도 눌린 버튼을 놓아 준다
+writes = []
+class FailLink:
+    handle = 1
+    name = "COM9"
+    def __init__(self): self.n = 0
+    def write(self, dd):
+        self.n += 1
+        writes.append(bytes(dd))
+        return self.n != 1       # 첫 번째만 실패
+    def close(self): pass
+ef = mt.Engine(); ef.pico = FailLink(); ef.use_pico = True
+ef.pico_btn = 0x01
+ef._pico_dx = 5
+ef._pico_flush()
+released = [w for w in writes[1:] if w and w[3] == 0]
+check("실패해도 버튼 놓기 시도", bool(released), str(writes))
+check("버튼 상태도 비움", ef.pico_btn == 0, str(ef.pico_btn))
+
+# 13-4) 재생이 끝나면 use_pico 가 꺼져 있어도 버튼을 놓는다
+writes2 = []
+class OkLink:
+    handle = 1
+    name = "COM9"
+    def write(self, dd): writes2.append(bytes(dd)); return True
+    def close(self): pass
+mt.send = lambda b: len(b)
+ep = mt.Engine(); ep.pico = OkLink(); ep.use_pico = False
+ep.pico_btn = 0x02          # 피코가 오른쪽 버튼을 잡고 있는 상태
+ep.events = [["m", 0.0, 1, 0, 0, 0, 0]]
+ep._play_worker(1, 1.0, False, False, 0)
+check("재생 끝에 피코 버튼 해제",
+      any(w[3] == 0 for w in writes2) and ep.pico_btn == 0, str(writes2))
+
+# 13-5) 저장 실패를 알려 준다
+es2 = mt.Engine()
+es2.events = [["m", 0.1, 1, 1, 0, 0, 0]]
+ok = es2.save(os.path.join(d, "없는폴더", "x.json"))
+logs = []
+while not es2.log_q.empty(): logs.append(es2.log_q.get())
+check("저장 실패 시 False", ok is False, str(ok))
+check("저장 실패를 로그에 남김", any("저장 실패" in l for l in logs), str(logs))
+check("정상 저장은 True", es2.save(os.path.join(d, "ok.json")) is True, "")
+
 print()
 print("=" * 52)
 if fails:

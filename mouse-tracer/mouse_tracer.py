@@ -953,6 +953,12 @@ class Engine:
         if not self.pico.write(pico_frames(dx, dy, self.pico_btn, wheel)):
             self.use_pico = False
             self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+            if self.pico_btn:
+                # 버튼이 눌린 채로 남으면 프로그램을 꺼도 계속 눌려 있다.
+                # 한 번은 놓기를 시도한다.
+                self.pico.write(pico_frames(0, 0, 0, 0))
+                self.pico_btn = 0
+                self._pico_sent_btn = 0
 
     def _emit_pico(self, batch):
         """재생 입력을 피코로 넘겨 진짜 마우스가 움직이게 한다.
@@ -1086,17 +1092,35 @@ class Engine:
         ok = 0
         err = 0
         ctypes.set_last_error(0)
-        for _ in range(shots):
-            for dx in (6, -6):
-                if mover(dx):
-                    ok += 1
+
+        def burst(step):
+            got = 0
+            last = 0
+            for _ in range(shots):
+                if mover(step):
+                    got += 1
                 else:
-                    err = ctypes.get_last_error()
+                    last = ctypes.get_last_error()
                 time.sleep(0.012)
-        time.sleep(0.35)
+            return got, last
+
+        # 한쪽으로 먼저 다 보내고 그때 커서를 잰다. 왕복으로 보내면 제자리로
+        # 돌아와서, 실제로 움직였는데도 안 움직인 것처럼 보인다.
+        got, last = burst(6)
+        ok += got
+        err = last or err
+        time.sleep(0.08)
+        pt_mid = POINT()
+        user32.GetCursorPos(ctypes.byref(pt_mid))
+
+        got, last = burst(-6)   # 커서를 원래 자리로 돌려놓는다
+        ok += got
+        err = last or err
+        time.sleep(0.3)
         pt1 = POINT()
         user32.GetCursorPos(ctypes.byref(pt1))
-        moved = (pt0.x != pt1.x) or (pt0.y != pt1.y)
+        moved = ((pt_mid.x != pt0.x) or (pt_mid.y != pt0.y)
+                 or (pt1.x != pt0.x) or (pt1.y != pt0.y))
         res = {"name": name, "ok": ok, "total": shots * 2, "err": err,
                "moved": moved, "arrived": self.pkt_total - b_total,
                "inj": self.inj_packets - b_inj, "verified": can_verify}
@@ -1137,7 +1161,10 @@ class Engine:
                 if r["inj"] > 0:
                     best = r
                     break
-            worked = [r for r in results if r["moved"]]
+            # 커서 움직임이 안 잡혀도, 보내기가 성공했다고 답한 방식은
+            # 들어간 것으로 본다
+            worked = [r for r in results
+                      if r["moved"] or (r["verified"] and r["ok"] > 0)]
 
             self.log("-" * 50)
             if best:
@@ -1344,6 +1371,11 @@ class Engine:
                     rel.append(mouse_input(0, 0, data, fl))
             for (scan, _ext), (fl, vkey) in held_keys.items():
                 rel.append(key_input(scan, fl | KEYEVENTF_KEYUP, vkey))
+            # 피코가 버튼을 잡고 있으면 use_pico 가 꺼졌더라도 놓아 준다
+            if self.pico.handle and (self.pico_btn or self._pico_sent_btn):
+                self.pico.write(pico_frames(0, 0, 0, 0))
+                self.pico_btn = 0
+                self._pico_sent_btn = 0
             self._emit(rel)
             if self.use_pico and self.pico.handle:
                 self._pico_flush()
@@ -1356,14 +1388,20 @@ class Engine:
 
     # ---------- 저장 / 불러오기
     def save(self, path):
+        """기록을 파일로 저장한다. 실패하면 False 를 돌려준다."""
         data = {"version": 1,
                 "created": datetime.datetime.now().isoformat(timespec="seconds"),
                 "start_pos": self.start_pos,
                 "duration": self.duration(),
                 "events": list(self.events)}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception as e:
+            self.log("저장 실패: {}".format(e))
+            return False
         self.log("저장 완료: {}".format(os.path.basename(path)))
+        return True
 
     def load(self, path):
         if self.recording or self.playing:
@@ -1498,6 +1536,7 @@ class App:
         self.port_box = ttk.Combobox(prow, textvariable=self.port_var,
                                      width=10, state="readonly")
         self.port_box.pack(side="left")
+        self.port_box.bind("<<ComboboxSelected>>", self.on_port_change)
         ttk.Button(prow, text="포트 찾기",
                    command=self.refresh_ports).pack(side="left", padx=6)
         ttk.Button(picof, text="연결 시험 (커서가 네모를 그립니다)",
@@ -1564,8 +1603,10 @@ class App:
         p = filedialog.asksaveasfilename(defaultextension=".json",
                                          filetypes=[("동작 기록", "*.json")],
                                          initialfile="기록.json")
-        if p:
-            self.eng.save(p)
+        if p and not self.eng.save(p):
+            messagebox.showerror(APP_NAME, "저장하지 못했습니다. 다른 위치를 "
+                                           "고르거나 파일이 열려 있는지 "
+                                           "확인하세요.")
 
     def on_load(self):
         p = filedialog.askopenfilename(filetypes=[("동작 기록", "*.json"),
@@ -1686,6 +1727,29 @@ class App:
             self.port_var.set(ports[-1])
         self.eng.log("찾은 포트: {}".format(", ".join(ports) if ports
                                            else "없음"))
+
+    def on_port_change(self, _event=None):
+        """이미 연결돼 있는데 포트를 바꾸면 새 포트로 다시 연결한다.
+
+        이걸 안 하면 창에는 새 포트가 보이는데 실제로는 옛 포트로 계속
+        내보낸다.
+        """
+        if not self.eng.pico.handle:
+            return
+        name = self.port_var.get()
+        if not name or name == self.eng.pico.name:
+            return
+        if self.eng.playing or self.eng.recording:
+            self.port_var.set(self.eng.pico.name or "")
+            self.eng.log("녹화나 재생 중에는 포트를 바꿀 수 없습니다.")
+            return
+        if self.eng.pico.open(name):
+            self.eng.log("피코 포트를 {} 로 바꿨습니다.".format(name))
+        else:
+            self.eng.use_pico = False
+            self.v_pico.set(False)
+            self.eng.log("{} 포트를 열지 못했습니다. 피코 사용을 "
+                         "껐습니다.".format(name))
 
     def toggle_pico(self):
         if self.v_pico.get():
