@@ -113,6 +113,8 @@ MOUSEEVENTF_RIGHTDOWN = 0x0008
 MOUSEEVENTF_RIGHTUP = 0x0010
 MOUSEEVENTF_MIDDLEDOWN = 0x0020
 MOUSEEVENTF_MIDDLEUP = 0x0040
+MOUSEEVENTF_XDOWN = 0x0080
+MOUSEEVENTF_XUP = 0x0100
 
 # 피코(USB 장치)로 보낼 때 쓰는 값
 PICO_SYNC = 0xAB
@@ -512,9 +514,16 @@ def mouse_input(dx=0, dy=0, data=0, flags=0):
     return i
 
 
-def key_input(scan, flags):
+def key_input(scan, flags, vk=0):
+    """키 입력 하나를 만든다.
+
+    SendInput 은 KEYEVENTF_SCANCODE 가 켜져 있으면 스캔코드만 보고 vk 는
+    무시한다. 그래도 vk 를 같이 실어 두는 이유는, SendInput 이 막혀서
+    구형 keybd_event 로 내려갔을 때 그쪽은 스캔코드만으로는 동작하지
+    않기 때문이다.
+    """
     i = INPUT(type=INPUT_KEYBOARD)
-    i.ki = KEYBDINPUT(0, scan, flags, 0, SIGNATURE)
+    i.ki = KEYBDINPUT(vk, scan, flags, 0, SIGNATURE)
     return i
 
 
@@ -848,8 +857,11 @@ class Engine:
                 user32.mouse_event(i.mi.dwFlags, i.mi.dx, i.mi.dy,
                                    i.mi.mouseData, SIGNATURE)
             else:
-                user32.keybd_event(0, i.ki.wScan & 0xFF, i.ki.dwFlags,
-                                   SIGNATURE)
+                # keybd_event 는 KEYEVENTF_SCANCODE 를 모른다. 가상 키 코드로
+                # 보내되, 확장키 표시와 뗌 표시만 넘긴다.
+                flags = i.ki.dwFlags & (KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP)
+                user32.keybd_event(i.ki.wVk & 0xFF, i.ki.wScan & 0xFF,
+                                   flags, SIGNATURE)
 
     def _warn_pico_once(self, kind, message):
         """같은 안내를 재생 한 번에 한 번만 로그에 남긴다."""
@@ -925,6 +937,9 @@ class Engine:
             if fl & MOUSEEVENTF_HWHEEL:
                 self._warn_pico_once(
                     "hwheel", "피코 재생 중에는 가로 휠이 빠집니다.")
+            if fl & (MOUSEEVENTF_XDOWN | MOUSEEVENTF_XUP):
+                self._warn_pico_once(
+                    "xbutton", "피코 재생 중에는 마우스 옆 버튼이 빠집니다.")
 
         if now_urgent or (time.perf_counter() - self._pico_flush_t) >= 0.004:
             self._pico_flush()
@@ -989,8 +1004,12 @@ class Engine:
         except Exception:
             pass
 
-    def _try_method(self, name, mover, shots=10):
-        """한 가지 입력 방법을 시험하고 결과를 돌려준다."""
+    def _try_method(self, name, mover, shots=10, can_verify=True):
+        """한 가지 입력 방법을 시험하고 결과를 돌려준다.
+
+        can_verify 가 False 면 그 방법은 성공 여부를 돌려주지 않는 함수라서,
+        몇 번 보냈는지만 셀 수 있다. 성공한 것처럼 적지 않는다.
+        """
         pt0 = POINT()
         user32.GetCursorPos(ctypes.byref(pt0))
         b_total, b_inj = self.pkt_total, self.inj_packets
@@ -1010,11 +1029,13 @@ class Engine:
         moved = (pt0.x != pt1.x) or (pt0.y != pt1.y)
         res = {"name": name, "ok": ok, "total": shots * 2, "err": err,
                "moved": moved, "arrived": self.pkt_total - b_total,
-               "inj": self.inj_packets - b_inj}
-        self.log("[{}] 성공 {}/{} · 오류코드 {} · 커서움직임 {} · "
-                 "도착패킷 {} · 합성판정 {}".format(
-                     name, res["ok"], res["total"], res["err"],
-                     "있음" if moved else "없음", res["arrived"], res["inj"]))
+               "inj": self.inj_packets - b_inj, "verified": can_verify}
+        head = ("성공 {}/{} · 오류코드 {}".format(ok, shots * 2, err)
+                if can_verify else
+                "{}번 보냄 (이 방식은 성공 여부 확인 불가)".format(shots * 2))
+        self.log("[{}] {} · 커서움직임 {} · 도착패킷 {} · 합성판정 {}".format(
+            name, head, "있음" if moved else "없음",
+            res["arrived"], res["inj"]))
         return res
 
     def _selftest_worker(self):
@@ -1034,9 +1055,11 @@ class Engine:
                     [mouse_input(dx, 0, 0, MOUSEEVENTF_MOVE)]) == 1))
 
             def legacy(dx):
+                # mouse_event 는 아무것도 돌려주지 않는다. 막혀도 조용하다.
                 user32.mouse_event(MOUSEEVENTF_MOVE, dx, 0, 0, SIGNATURE)
                 return True
-            results.append(self._try_method("구형 mouse_event", legacy))
+            results.append(self._try_method("구형 mouse_event", legacy,
+                                            can_verify=False))
 
             self._trace_left = 0
             best = None
@@ -1220,12 +1243,16 @@ class Engine:
                         fl = KEYEVENTF_SCANCODE
                         if kflags & RI_KEY_E0:
                             fl |= KEYEVENTF_EXTENDEDKEY
+                        # 왼쪽/오른쪽 Ctrl 처럼 스캔코드가 같고 확장키
+                        # 표시만 다른 키가 있다. 둘을 같은 키로 세면 한쪽이
+                        # 눌린 채로 남는다.
+                        slot = (scan, bool(kflags & RI_KEY_E0))
                         if kflags & RI_KEY_BREAK:
                             fl |= KEYEVENTF_KEYUP
-                            held_keys.pop(scan, None)
+                            held_keys.pop(slot, None)
                         else:
-                            held_keys[scan] = fl
-                        batch.append(key_input(scan, fl))
+                            held_keys[slot] = (fl, vkey)
+                        batch.append(key_input(scan, fl, vkey))
                     self._emit(batch)
                 if self._stop_play.is_set():
                     break
@@ -1242,8 +1269,8 @@ class Engine:
                 if b in RELEASE_MAP:
                     fl, data = RELEASE_MAP[b]
                     rel.append(mouse_input(0, 0, data, fl))
-            for scan, fl in held_keys.items():
-                rel.append(key_input(scan, fl | KEYEVENTF_KEYUP))
+            for (scan, _ext), (fl, vkey) in held_keys.items():
+                rel.append(key_input(scan, fl | KEYEVENTF_KEYUP, vkey))
             self._emit(rel)
             if self.use_pico and self.pico.handle:
                 self._pico_flush()
@@ -1266,6 +1293,10 @@ class Engine:
         self.log("저장 완료: {}".format(os.path.basename(path)))
 
     def load(self, path):
+        if self.recording or self.playing:
+            self.log("녹화나 재생 중에는 기록을 불러올 수 없습니다. "
+                     "먼저 정지하세요.")
+            return
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         self.events = data.get("events", [])

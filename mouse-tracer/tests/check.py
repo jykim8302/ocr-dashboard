@@ -8,7 +8,7 @@ Windows 전용 프로그램이라 리눅스에서는 실행할 수 없다. 그�
 
 한 항목이라도 실패하면 종료 코드 1 을 돌려준다.
 """
-import ctypes, sys, types, os, importlib.util, tempfile, random, time
+import ctypes, io, sys, types, os, importlib.util, tempfile, random, time
 
 class FakeFunc:
     def __init__(s, n): s.n = n; s.argtypes = None; s.restype = None
@@ -41,7 +41,7 @@ def check(name, ok, detail=""):
     print(("  통과  " if ok else "  실패  ") + name + (" :: " + detail if detail else ""))
     if not ok: fails.append(name)
 
-print("=== 4. Win32 구조체 크기 (64비트 Windows 기준) ===")
+print("=== 1. Win32 구조체 크기 (64비트 Windows 기준) ===")
 for n, want in (("RAWINPUTHEADER",24), ("RAWMOUSE",24), ("RAWKEYBOARD",16),
                 ("RAWINPUT",48), ("RAWINPUTDEVICE",16), ("MOUSEINPUT",32),
                 ("KEYBDINPUT",24), ("INPUT",40), ("MSG",48), ("POINT",8),
@@ -54,7 +54,7 @@ for n, field, want in (("RAWMOUSE","lLastX",12), ("RAWMOUSE","btn",4),
     check("%s.%s 위치 %d" % (n, field, want), got == want, "실제 %d" % got)
 
 print()
-print("=== 5. 원시 입력 분류 (진짜 마우스 vs 만들어낸 입력) ===")
+print("=== 2. 원시 입력 분류 (진짜 마우스 vs 만들어낸 입력) ===")
 e = mt.Engine(); e.recording = True; e._t0 = time.perf_counter()
 addr = ctypes.addressof(e._buf)
 step = (ctypes.sizeof(mt.RAWINPUT) + mt.RAW_ALIGN - 1) & ~(mt.RAW_ALIGN - 1)
@@ -79,7 +79,7 @@ check("마지막 원시 이동 보존", (e.raw_dx, e.raw_dy) == (3, -1), str((e.
 check("장치번호 0 을 합성으로 판정", e.inj_hdevice == 0, str(e.inj_hdevice))
 
 print()
-print("=== 6. 재생 로직 (버튼/휠/키보드/자동해제) ===")
+print("=== 3. 재생 로직 (버튼/휠/키보드/자동해제) ===")
 sent = []
 mt.send = lambda b: (sent.extend(b), len(b))[1]
 e2 = mt.Engine()
@@ -98,7 +98,7 @@ check("안 뗀 오른쪽 버튼 자동 해제", any(k[1] == '0x10' for k in kind
 check("눌린 키 자동 해제", any(k[0] == 1 and k[1] == '0xa' for k in kinds[-3:]), "")
 
 print()
-print("=== 7. 피코 경로 (총 이동량 보존 / 클릭 보존) ===")
+print("=== 4. 피코 경로 (총 이동량 보존 / 클릭 보존) ===")
 buf = bytearray()
 class Link:
     handle = 1
@@ -128,7 +128,7 @@ check("전송량 줄어듦", len(frames) < 400, "%d묶음 (원본 1002건)" % le
 check("모든 값 범위 안", all(-127 <= (f[1]-256 if f[1]>127 else f[1]) <= 127 for f in frames), "")
 
 print()
-print("=== 8. 피코 펌웨어 (pico/code.py 를 실제로 돌린다) ===")
+print("=== 5. 피코 펌웨어 (pico/code.py 를 실제로 돌린다) ===")
 
 class _Stop(Exception):
     """프레임을 다 먹인 뒤 펌웨어의 무한 루프를 빠져나오기 위한 신호."""
@@ -216,7 +216,7 @@ moves, buttons = run_firmware(b"\x00\x11\x22" + mt.pico_frames(7, -5, 0, 0))
 check("깨진 앞부분 건너뛰고 복구", moves and moves[0] == (7, -5, 0), str(moves[:1]))
 
 print()
-print("=== 9. 단축키 ===")
+print("=== 6. 단축키 ===")
 e4 = mt.Engine(); e4.hwnd = 999
 reg = []
 mt.user32.RegisterHotKey = lambda h, i, m, v: (reg.append((i, m, v)), 0 if v == 0x77 else 1)[1]
@@ -229,7 +229,7 @@ check("반복 입력 방지 플래그", all(m & mt.MOD_NOREPEAT for _, m, _ in r
 check("표시 글자", mt.hotkey_text(["F6", mt.MOD_CONTROL | mt.MOD_SHIFT]) == "Ctrl+Shift+F6", "")
 
 print()
-print("=== 10. 설정 저장 / 불러오기 ===")
+print("=== 7. 설정 저장 / 불러오기 ===")
 d = tempfile.mkdtemp(); mt.SETTINGS_FILE = os.path.join(d, "s.json")
 cfg = {"hotkeys": {"record": ["F9", 2], "play": ["F10", 0], "stop": ["F11", 0]},
        "repeat": "3", "speed": "1.5", "gap": "0.2", "pico_port": "COM7",
@@ -243,7 +243,7 @@ mt.SETTINGS_FILE = os.path.join(d, "깨짐.json")
 check("깨진 파일도 안 죽음", mt.load_settings() == {}, "")
 
 print()
-print("=== 11. 기록 저장 / 불러오기 ===")
+print("=== 8. 기록 저장 / 불러오기 ===")
 e5 = mt.Engine()
 e5.events = [["m", 0.1, 3, -2, 1, 0, 0], ["k", 0.2, 30, 0, 65]]
 e5.start_pos = (640, 480)
@@ -254,7 +254,7 @@ check("길이 계산", abs(e6.duration() - 0.2) < 1e-9, str(e6.duration()))
 
 
 print()
-print("=== 12. 이번에 고친 버그들 (재발 방지) ===")
+print("=== 9. 이번에 고친 버그들 (재발 방지) ===")
 
 # 12-1) 지금 마우스 설정을 못 읽으면 저장하지 않는다
 e7 = mt.Engine()
@@ -368,7 +368,7 @@ check("휠 40씩 3번 = 1칸", notches == 1, "%d칸" % notches)
 
 
 print()
-print("=== 13. 전체 검토에서 나온 것들 (재발 방지) ===")
+print("=== 10. 전체 검토에서 나온 것들 (재발 방지) ===")
 
 def pico_engine():
     out = bytearray()
@@ -467,6 +467,81 @@ check("기록 없음 안내도 설정을 따라감", "Ctrl+F2 로 녹화" in joi
 check("재생 안내가 설정을 따라감", "정지는 F3 또는 F4" in joined, joined[:200])
 check("옛 단축키가 남아 있지 않음",
       not any(x in joined for x in ("F6", "F7", "F8", "F9")), joined[:200])
+
+
+print()
+print("=== 11. 두 번째 전체 검토에서 나온 것들 (재발 방지) ===")
+
+# 14-1) 스캔코드가 같고 확장키 표시만 다른 키를 따로 센다 (왼/오른 Ctrl)
+sent2 = []
+mt.send = lambda b: (sent2.extend(b), len(b))[1]
+ek = mt.Engine()
+ek.events = [["k", 0.000, 0x1D, 0, 0xA2],                         # 왼쪽 Ctrl 누름
+             ["k", 0.002, 0x1D, mt.RI_KEY_E0, 0xA3],              # 오른쪽 Ctrl 누름
+             ["k", 0.004, 0x1D, mt.RI_KEY_BREAK | mt.RI_KEY_E0, 0xA3]]  # 오른쪽만 뗌
+ek._play_worker(1, 1.0, False, False, 0)
+keys = [i for i in sent2 if i.type == mt.INPUT_KEYBOARD]
+ups = [i for i in keys if i.ki.dwFlags & mt.KEYEVENTF_KEYUP]
+auto = [i for i in ups if not (i.ki.dwFlags & mt.KEYEVENTF_EXTENDEDKEY)]
+check("확장키 짝을 따로 셈 (왼쪽 Ctrl 이 자동 해제됨)",
+      len(auto) == 1 and auto[0].ki.wScan == 0x1D,
+      "뗌 %d건, 그중 비확장 %d건" % (len(ups), len(auto)))
+check("오른쪽 Ctrl 을 두 번 떼지 않음",
+      len([i for i in ups if i.ki.dwFlags & mt.KEYEVENTF_EXTENDEDKEY]) == 1, "")
+
+# 14-2) 구형 경로는 가상 키 코드로 보낸다 (스캔코드 플래그는 빼고)
+legacy_calls = []
+mt.user32.keybd_event = lambda vk, sc, fl, extra_: legacy_calls.append((vk, sc, fl))
+mt.user32.mouse_event = lambda *a: None
+ek2 = mt.Engine()
+ek2._emit_legacy([mt.key_input(0x1D, mt.KEYEVENTF_SCANCODE
+                               | mt.KEYEVENTF_EXTENDEDKEY, 0xA3)])
+check("구형 경로가 가상 키 코드를 씀",
+      legacy_calls and legacy_calls[0][0] == 0xA3, str(legacy_calls))
+check("구형 경로에 스캔코드 플래그를 안 넘김",
+      legacy_calls and not (legacy_calls[0][2] & mt.KEYEVENTF_SCANCODE),
+      hex(legacy_calls[0][2]) if legacy_calls else "")
+
+# 14-3) 마우스 옆 버튼도 조용히 사라지지 않는다
+en, out = pico_engine()
+en._emit([mt.mouse_input(0, 0, 1, mt.MOUSEEVENTF_XDOWN)])
+logs = []
+while not en.log_q.empty(): logs.append(en.log_q.get())
+check("옆 버튼 빠질 때 안내함", any("옆 버튼" in l for l in logs), str(logs))
+
+# 14-4) 성공 여부를 모르는 방식은 성공했다고 적지 않는다
+mt.user32.GetCursorPos = lambda ptr: None
+ed = mt.Engine()
+ed._try_method("구형 시험", lambda dx: True, shots=1, can_verify=False)
+logs = []
+while not ed.log_q.empty(): logs.append(ed.log_q.get())
+joined = " ".join(logs)
+check("확인 불가한 방식은 그렇게 적음", "확인 불가" in joined, joined[:100])
+check("성공 2/2 같은 문구를 쓰지 않음", "성공 2/2" not in joined, joined[:100])
+
+# 14-5) 녹화나 재생 중에는 기록을 갈아치울 수 없다
+el = mt.Engine()
+el.events = [["m", 0.1, 1, 1, 0, 0, 0]]
+el.save(os.path.join(d, "keep.json"))
+el2 = mt.Engine()
+el2.events = [["m", 9.9, 5, 5, 0, 0, 0]]
+el2.recording = True
+el2.load(os.path.join(d, "keep.json"))
+check("녹화 중 불러오기 거절", el2.events == [["m", 9.9, 5, 5, 0, 0, 0]],
+      str(el2.events))
+el2.recording = False; el2.playing = True
+el2.load(os.path.join(d, "keep.json"))
+check("재생 중 불러오기 거절", el2.events == [["m", 9.9, 5, 5, 0, 0, 0]],
+      str(el2.events))
+el2.playing = False
+el2.load(os.path.join(d, "keep.json"))
+check("멈춰 있으면 불러와짐", len(el2.events) == 1 and el2.events[0][1] == 0.1,
+      str(el2.events))
+
+# 14-6) 피코가 COM 포트를 하나만 만들도록 설정돼 있다
+boot_src = io.open(os.path.join(ROOT, "pico", "boot.py"), encoding="utf-8").read()
+check("boot.py 가 콘솔 포트를 끔", "console=False" in boot_src,
+      "console=True 면 COM 포트가 두 개 생겨 어느 쪽인지 알 수 없다")
 
 print()
 print("=" * 52)

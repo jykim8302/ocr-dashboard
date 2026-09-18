@@ -5,8 +5,11 @@
 #   1. USB 마우스 (HID)
 #   2. PC 와 데이터를 주고받는 시리얼 포트
 #
-# 이 파일이 없으면 PC 가 피코로 움직임을 보낼 수 없습니다.
+# console=False 로 두는 것이 중요합니다. True 로 두면 COM 포트가 두 개
+# 생기는데, 둘 중 어느 것이 데이터 포트인지 겉으로는 구별되지 않습니다.
+# 콘솔 포트를 골라 연결하면 보내기는 성공했다고 나오는데 마우스는 꿈쩍도
+# 하지 않습니다. 포트를 하나만 만들어 그런 일이 없게 합니다.
 
 import usb_cdc
 
-usb_cdc.enable(console=True, data=True)
+usb_cdc.enable(console=False, data=True)
