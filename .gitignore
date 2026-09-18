@@ -11,3 +11,4 @@ final_output.zip
 *.log
 .gemini/
 mouse-tracer/mouse_tracer_settings.json
+mouse-tracer/mouse_tracer.py.bak

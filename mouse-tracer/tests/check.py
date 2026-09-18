@@ -543,6 +543,81 @@ boot_src = io.open(os.path.join(ROOT, "pico", "boot.py"), encoding="utf-8").read
 check("boot.py 가 콘솔 포트를 끔", "console=False" in boot_src,
       "console=True 면 COM 포트가 두 개 생겨 어느 쪽인지 알 수 없다")
 
+
+print()
+print("=== 12. 세 번째 전체 검토에서 나온 것들 (재발 방지) ===")
+
+# 12-1) 손상된 기록은 바꿔 넣기 전에 걸러진다
+good = [["m", 0.1, 1, 1, 0, 0, 0]]
+for broken in ([[]], ["x"], [["m", 0.1, 1]], [["k", 0.1, 1, 2]],
+               [["m", 0.1, 1, 1, 0, 0, "x"]], "문자열", [["z", 0.1, 1, 1, 0, 0, 0]]):
+    bp = os.path.join(d, "broken.json")
+    _json.dump({"version": 1, "events": broken, "start_pos": [1, 2]},
+               open(bp, "w"))
+    eb = mt.Engine(); eb.events = [list(good[0])]
+    eb.load(bp)
+    ok_keep = eb.events == good
+    try:
+        eb.duration(); ok_dur = True
+    except Exception:
+        ok_dur = False
+    check("손상 기록 거부 %s" % str(broken)[:26], ok_keep and ok_dur,
+          "남은 기록=%s" % eb.events)
+
+# 12-2) 길이 계산은 무슨 값이 들어와도 던지지 않는다
+ed2 = mt.Engine()
+for junk in ([[]], [["m"]], [["m", "글자"]], None, 5, [[None]]):
+    ed2.events = junk
+    try:
+        ed2.duration(); ok = True
+    except Exception as ex:
+        ok = False
+    check("길이 계산이 안 죽음 %s" % str(junk)[:18], ok, "")
+ed2.events = good
+check("정상일 때는 제 값", abs(ed2.duration() - 0.1) < 1e-9, str(ed2.duration()))
+
+# 12-3) 저장에는 적용된 단축키만 들어간다 (창에 찍힌 값이 아니라)
+fc = mt.App.__new__(mt.App)
+fc.eng = mt.Engine()
+fc.eng.hotkeys = {"record": ["F6", 0], "play": ["F7", 0], "stop": ["F8", 0]}
+fc.hk_key = dict((k, V()) for k, _h, _l in mt.ACTIONS)
+fc.hk_mod = dict((k, dict((b, V()) for b in (mt.MOD_CONTROL, mt.MOD_ALT,
+                                             mt.MOD_SHIFT)))
+                 for k, _h, _l in mt.ACTIONS)
+for k, _h, _l in mt.ACTIONS:
+    fc.hk_key[k].set("F9")          # 세 칸 모두 같은 키로 (적용은 안 함)
+    for b in fc.hk_mod[k]:
+        fc.hk_mod[k][b].set(False)
+for n in ("repeat", "speed", "gap", "port_var", "v_kbd", "v_goto", "v_prec"):
+    setattr(fc, n, V()); getattr(fc, n).set("1")
+saved_hk = fc.collect()["hotkeys"]
+check("저장값은 적용된 단축키",
+      saved_hk == {"record": ["F6", 0], "play": ["F7", 0], "stop": ["F8", 0]},
+      str(saved_hk))
+check("창에 찍힌 겹치는 값은 저장 안 됨",
+      len({tuple(v) for v in saved_hk.values()}) == 3, str(saved_hk))
+
+# 12-4) 검사 도는 중에는 녹화도 재생도 시작하지 않는다
+es = mt.Engine(); es.selftest_running = True
+es.start_record()
+check("검사 중 녹화 거절", not es.recording, "")
+es.events = [list(good[0])]
+es.start_play(repeat=1, speed=1.0, goto_start=False, precise=False, gap=0)
+check("검사 중 재생 거절", not es.playing, "")
+
+# 12-5) 32비트 파이썬에서는 버퍼 읽기를 쓰지 않는다
+saved_flag = mt.IS_WOW64
+try:
+    mt.IS_WOW64 = True
+    ew = mt.Engine()
+    called = {"n": 0}
+    mt.user32.GetRawInputBuffer = lambda *a: called.__setitem__("n", called["n"] + 1) or 1
+    got = ew._drain_buffer()
+    check("WOW64 면 버퍼 읽기 건너뜀", got == 0 and called["n"] == 0,
+          "반환=%s 호출=%d" % (got, called["n"]))
+finally:
+    mt.IS_WOW64 = saved_flag
+
 print()
 print("=" * 52)
 if fails:

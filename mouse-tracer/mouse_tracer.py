@@ -496,6 +496,59 @@ def pico_frames(dx, dy, buttons, wheel):
     return bytes(out)
 
 
+def is_wow64():
+    """32비트 파이썬이 64비트 Windows 위에서 도는 중인지 본다.
+
+    그 경우 GetRawInputBuffer 가 64비트 모양으로 자료를 돌려주기 때문에,
+    32비트 모양으로 읽으면 어긋난 값을 기록하게 된다.
+    """
+    try:
+        kernel32.GetCurrentProcess.restype = HANDLE
+        kernel32.IsWow64Process.argtypes = [HANDLE, ctypes.POINTER(BOOL)]
+        flag = BOOL(0)
+        if kernel32.IsWow64Process(kernel32.GetCurrentProcess(),
+                                   ctypes.byref(flag)):
+            return bool(flag.value)
+    except Exception:
+        pass
+    return False
+
+
+IS_WOW64 = is_wow64()
+
+
+def clean_events(raw):
+    """불러온 기록이 쓸 수 있는 모양인지 본다. 아니면 None 을 돌려준다.
+
+    모양을 확인하기 전에 목록을 바꿔 넣으면, 길이를 계산하다 오류가 나고
+    그 오류가 창 갱신 루프를 멈춰 창이 얼어붙는다.
+    """
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or not item:
+            return None
+        kind = item[0]
+        if not ((kind == "m" and len(item) == 7)
+                or (kind == "k" and len(item) == 5)):
+            return None
+        for value in item[1:]:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return None
+        out.append(list(item))
+    return out
+
+
+def clean_start_pos(raw):
+    """저장된 시작 좌표가 쓸 만한지 본다."""
+    if (isinstance(raw, (list, tuple)) and len(raw) == 2
+            and all(not isinstance(v, bool) and isinstance(v, (int, float))
+                    for v in raw)):
+        return (int(raw[0]), int(raw[1]))
+    return None
+
+
 def to_signed16(v):
     return v - 0x10000 if v & 0x8000 else v
 
@@ -590,6 +643,9 @@ class Engine:
         if self.playing:
             self.log("재생 중에는 녹화할 수 없습니다.")
             return
+        if self.selftest_running:
+            self.log("검사가 끝난 뒤에 녹화하세요.")
+            return
         with self._lock:
             self.events = []
             pt = POINT()
@@ -608,9 +664,15 @@ class Engine:
             len(self.events), self.duration()))
 
     def duration(self):
-        # 녹화 중에는 다른 스레드가 목록을 갈아치울 수 있으니 한 번만 읽는다
+        # 녹화 중에는 다른 스레드가 목록을 갈아치울 수 있으니 한 번만 읽는다.
+        # 이 값은 창 갱신 루프가 계속 부르므로 무슨 일이 있어도 던지지 않는다.
         events = self.events
-        return events[-1][1] if events else 0.0
+        if not events:
+            return 0.0
+        try:
+            return float(events[-1][1])
+        except Exception:
+            return 0.0
 
     # ---------- 원시 입력 처리 (Raw Input)
     def _device_name(self, handle):
@@ -694,6 +756,10 @@ class Engine:
 
         폴링 속도가 높은 마우스(1000Hz 등)에서 패킷을 흘리지 않기 위한 경로다.
         """
+        if IS_WOW64:
+            # 32비트 파이썬 + 64비트 Windows 조합에서는 버퍼 모양이 달라
+            # 어긋난 값을 읽게 된다. 한 건씩 읽는 쪽만 쓴다.
+            return 0
         got_any = 0
         for _ in range(64):  # 무한 루프 방지
             size = UINT(ctypes.sizeof(self._buf))
@@ -780,6 +846,10 @@ class Engine:
             self.raw_ready = True
             self.log("Raw Input 등록 완료. 마우스와 키보드의 원시 입력을 "
                      "직접 받습니다.")
+            if IS_WOW64:
+                self.log("32비트 파이썬으로 돌고 있습니다. 한 건씩 읽는 "
+                         "방식으로 동작합니다. 64비트 파이썬을 쓰면 더 "
+                         "빠릅니다.")
 
         self._register_hotkeys()
 
@@ -1149,6 +1219,9 @@ class Engine:
         if self.recording:
             self.log("녹화 중에는 재생할 수 없습니다.")
             return
+        if self.selftest_running:
+            self.log("검사가 끝난 뒤에 재생하세요.")
+            return
         if self.playing:
             return
         if not self.events:
@@ -1299,9 +1372,17 @@ class Engine:
             return
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        self.events = data.get("events", [])
-        sp = data.get("start_pos")
-        self.start_pos = tuple(sp) if sp else None
+        if not isinstance(data, dict):
+            self.log("기록 파일의 모양이 올바르지 않습니다. 불러오지 않았습니다.")
+            return
+        events = clean_events(data.get("events"))
+        if events is None:
+            self.log("기록 내용이 손상되어 불러오지 않았습니다. "
+                     "지금 기록은 그대로 둡니다.")
+            return
+        # 여기까지 통과한 뒤에야 바꿔 넣는다
+        self.events = events
+        self.start_pos = clean_start_pos(data.get("start_pos"))
         self.log("불러옴: {} (이벤트 {}개 / {:.2f}초)".format(
             os.path.basename(path), len(self.events), self.duration()))
 
@@ -1496,8 +1577,8 @@ class App:
                 messagebox.showerror(APP_NAME, "불러오기 실패: {}".format(e))
 
     # ---------- 설정 기억하기
-    def collect(self):
-        """지금 창에 있는 값을 모아 저장할 모양으로 만든다."""
+    def widget_hotkeys(self):
+        """창의 단축키 칸에 지금 찍혀 있는 값. 아직 적용 전일 수 있다."""
         hk = {}
         for key, _hid, _label in ACTIONS:
             mods = 0
@@ -1506,6 +1587,16 @@ class App:
                     mods |= bit
             name = self.hk_key[key].get() or self.eng.hotkeys[key][0]
             hk[key] = [name, mods]
+        return hk
+
+    def collect(self):
+        """저장할 값을 모은다.
+
+        단축키는 창에 찍힌 값이 아니라 실제로 적용된 값을 쓴다. 창의 값은
+        겹치는 조합일 수 있는데, 그대로 저장하면 다음에 켤 때 하나가
+        조용히 사라진다.
+        """
+        hk = dict((k, list(v)) for k, v in self.eng.hotkeys.items())
         return {"hotkeys": hk,
                 "repeat": self.repeat.get(),
                 "speed": self.speed.get(),
@@ -1571,7 +1662,7 @@ class App:
         return ok
 
     def apply_hotkeys(self):
-        cfg = self.collect()["hotkeys"]
+        cfg = self.widget_hotkeys()
         combos = [(v[0], v[1]) for v in cfg.values()]
         if len(set(combos)) < len(combos):
             self.eng.log("같은 단축키를 두 군데에 넣었습니다. 서로 다르게 "
@@ -1584,7 +1675,14 @@ class App:
     def refresh_ports(self):
         ports = list_com_ports()
         self.port_box["values"] = ports
-        if ports and not self.port_var.get():
+        current = self.port_var.get()
+        if current and current not in ports:
+            # 지난번 포트가 사라졌는데 그대로 두면 없는 포트에 연결을 시도한다
+            self.eng.log("지난번에 쓰던 {} 가 지금은 보이지 않습니다.".format(
+                current))
+            self.port_var.set("")
+            current = ""
+        if ports and not current:
             self.port_var.set(ports[-1])
         self.eng.log("찾은 포트: {}".format(", ".join(ports) if ports
                                            else "없음"))
