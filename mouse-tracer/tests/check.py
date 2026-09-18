@@ -570,7 +570,7 @@ for junk in ([[]], [["m"]], [["m", "글자"]], None, 5, [[None]]):
     ed2.events = junk
     try:
         ed2.duration(); ok = True
-    except Exception as ex:
+    except Exception:
         ok = False
     check("길이 계산이 안 죽음 %s" % str(junk)[:18], ok, "")
 ed2.events = good
