@@ -465,6 +465,7 @@ class PicoLink:
         self.name = None
         self.last_error = ""
         self.setup_note = ""
+        self.timed_out = False
 
     def open(self, name):
         self.close()
@@ -500,9 +501,8 @@ class PicoLink:
         self.name = name
         return True
 
-    def write(self, data):
-        if not self.handle or not data:
-            return False
+    def _raw_write(self, data):
+        """실제로 한 번 써 본다. 실패하면 이유를 last_error 에 적는다."""
         written = DWORD(0)
         buf = ctypes.create_string_buffer(bytes(data))
         ctypes.set_last_error(0)
@@ -510,14 +510,38 @@ class PicoLink:
                                 ctypes.byref(written), None)
         if ok and written.value == len(data):
             self.last_error = ""
+            self.timed_out = False
             return True
         if ok:
             # 오류는 아닌데 다 못 보냈다. 상대가 가져가지 않아 시간 초과된
-            # 경우다. DTR 이 꺼져 있거나 장치가 멈춰 있을 때 이렇게 된다.
+            # 경우다. 장치는 붙어 있으니 다시 열어도 소용없다.
             self.last_error = "시간 초과 ({}/{}바이트만 나감)".format(
                 written.value, len(data))
+            self.timed_out = True
         else:
             self.last_error = "오류 코드 {}".format(ctypes.get_last_error())
+            self.timed_out = False
+        return False
+
+    def write(self, data):
+        if not self.handle or not data:
+            return False
+        if self._raw_write(data):
+            return True
+        if self.timed_out or not self.name:
+            return False
+        # 장치를 뺐다 꽂으면 쥐고 있던 연결이 낡아서 못 쓴다.
+        # 시간 초과가 아니라면 한 번 다시 열어 보고 다시 써 본다.
+        first_error = self.last_error
+        name = self.name
+        if not self.open(name):
+            self.last_error = first_error + " (다시 열기도 실패)"
+            return False
+        if self._raw_write(data):
+            self.last_error = ""
+            return True
+        self.last_error = "{} -> 다시 열어도 {}".format(first_error,
+                                                       self.last_error)
         return False
 
     def close(self):
