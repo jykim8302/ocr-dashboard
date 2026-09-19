@@ -142,7 +142,7 @@ class _Stop(BaseException):
 
 def run_firmware(frame_bytes):
     """pico/code.py 를 그대로 불러들여 프레임을 먹이고 무엇을 냈는지 본다."""
-    moves, buttons = [], []
+    moves, buttons, said = [], [], []
 
     class FakeMouse:
         LEFT_BUTTON, RIGHT_BUTTON, MIDDLE_BUTTON = 1, 2, 4
@@ -177,6 +177,10 @@ def run_firmware(frame_bytes):
 
         def read(self, n):
             out = bytes(self.data[:n]); del self.data[:n]; return out
+
+        def write(self, payload):
+            said.append(bytes(payload))
+            return len(payload)
 
     class FakePin:
         pass
@@ -218,6 +222,7 @@ def run_firmware(frame_bytes):
                 sys.modules.pop(n, None)
             else:
                 sys.modules[n] = old
+    run_firmware.said = said
     return moves, buttons
 
 

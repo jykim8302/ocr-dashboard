@@ -34,7 +34,33 @@ led = digitalio.DigitalInOut(board.LED)
 led.direction = digitalio.Direction.OUTPUT
 
 port = usb_cdc.data
-mouse = Mouse(usb_hid.devices)
+try:
+    # 말을 보내다 막히면 안 되므로 기다리는 시간을 짧게 둔다
+    port.write_timeout = 0.1
+except Exception:
+    pass
+
+
+def say(text):
+    """PC 쪽 로그에 보일 한 줄을 보낸다. 실패해도 그냥 넘어간다."""
+    try:
+        port.write((text + "\n").encode("utf-8"))
+    except Exception:
+        pass
+
+
+try:
+    mouse = Mouse(usb_hid.devices)
+except Exception as start_error:
+    # 마우스를 못 만들었으면 최소한 무슨 일인지는 알려 주고,
+    # 포트는 계속 비워 준다. 멈추면 PC 가 원인을 볼 수 없다.
+    mouse = None
+    while True:
+        say("MOUSE FAIL " + repr(start_error))
+        for _ in range(20):
+            if port.in_waiting:
+                port.read(port.in_waiting)
+            time.sleep(0.05)
 
 BUTTON_BITS = (0x01, 0x02, 0x04)
 BUTTON_CODES = (Mouse.LEFT_BUTTON, Mouse.RIGHT_BUTTON, Mouse.MIDDLE_BUTTON)
@@ -60,7 +86,11 @@ pend_x = 0          # 아직 못 내보낸 이동량
 pend_y = 0
 pend_w = 0
 last_blink = time.monotonic()
+last_good = time.monotonic()
 trouble = False
+said = 0
+
+say("READY")
 
 while True:
     try:
@@ -117,10 +147,20 @@ while True:
                 last_blink = now
                 led.value = not led.value
 
-    except Exception:
+        # 한동안 아무 문제 없으면 오류 표시를 내린다
+        if trouble and time.monotonic() - last_good > 2.0:
+            trouble = False
+        if not trouble:
+            last_good = time.monotonic()
+
+    except Exception as err:
         # 무슨 일이 있어도 멈추지 않는다. 멈추면 PC 쪽 보내기가
         # 시간 초과로 실패하고, 원인을 볼 방법이 없다.
         trouble = True
+        last_good = time.monotonic()
+        if said < 5:                 # 같은 말을 끝없이 보내지 않는다
+            said += 1
+            say("ERR " + repr(err))
         buf = bytearray()
         pend_x = 0
         pend_y = 0

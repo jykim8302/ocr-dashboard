@@ -389,6 +389,9 @@ kernel32.CreateFileW.argtypes = [LPCWSTR, DWORD, DWORD, ctypes.c_void_p,
                                  DWORD, DWORD, HANDLE]
 kernel32.WriteFile.argtypes = [HANDLE, ctypes.c_void_p, DWORD,
                                ctypes.POINTER(DWORD), ctypes.c_void_p]
+kernel32.ReadFile.argtypes = [HANDLE, ctypes.c_void_p, DWORD,
+                              ctypes.POINTER(DWORD), ctypes.c_void_p]
+kernel32.ReadFile.restype = BOOL
 kernel32.CloseHandle.argtypes = [HANDLE]
 kernel32.GetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
 kernel32.SetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
@@ -493,7 +496,9 @@ class PicoLink:
             # 드라이버에 따라 DCB 만으로 안 되는 경우가 있어 직접 한 번 더
             kernel32.EscapeCommFunction(h, SETDTR)
             kernel32.EscapeCommFunction(h, SETRTS)
-            to = COMMTIMEOUTS(0, 0, 0, 0, 1000)
+            # 읽기는 기다리지 않고 지금 와 있는 것만 가져온다.
+            # 이렇게 해야 피코가 보내는 말을 창이 멈추지 않고 받을 수 있다.
+            to = COMMTIMEOUTS(0xFFFFFFFF, 0, 0, 0, 1000)
             kernel32.SetCommTimeouts(h, ctypes.byref(to))
         except Exception as e:
             self.setup_note = str(e)
@@ -522,6 +527,20 @@ class PicoLink:
             self.last_error = "오류 코드 {}".format(ctypes.get_last_error())
             self.timed_out = False
         return False
+
+    def read(self, size=512):
+        """피코가 보낸 말을 지금 와 있는 만큼만 가져온다."""
+        if not self.handle:
+            return b""
+        buf = ctypes.create_string_buffer(size)
+        got = DWORD(0)
+        try:
+            if not kernel32.ReadFile(self.handle, buf, size,
+                                     ctypes.byref(got), None):
+                return b""
+        except Exception:
+            return b""
+        return buf.raw[:got.value]
 
     def write(self, data):
         if not self.handle or not data:
@@ -1815,6 +1834,7 @@ class App:
                    command=self.clear_log).pack(side="left", expand=True,
                                                 fill="x", padx=3)
 
+        self._pico_rx = b""
         self._rate_t = time.perf_counter()
         self._rate_n = 0
         self._rate = 0
@@ -2127,7 +2147,28 @@ class App:
         self.info.set("기록 없음" if n == 0 else
                       "이벤트 {}개 · 길이 {:.2f}초".format(n, self.eng.duration()))
         self.update_raw_info()
+        self.poll_pico()
         self.root.after(60, self.pump)
+
+    def poll_pico(self):
+        """피코가 보낸 글을 로그에 옮긴다. 보드에서 난 오류를 여기서 본다."""
+        link = self.eng.pico
+        if not link.handle:
+            return
+        try:
+            chunk = link.read()
+        except Exception:
+            return
+        if not chunk:
+            return
+        self._pico_rx += chunk
+        if len(self._pico_rx) > 4096:          # 줄바꿈이 안 오면 버린다
+            self._pico_rx = self._pico_rx[-1024:]
+        while b"\n" in self._pico_rx:
+            line, self._pico_rx = self._pico_rx.split(b"\n", 1)
+            text = line.decode("utf-8", "replace").strip()
+            if text:
+                self.eng.log("피코: " + text)
 
     def update_raw_info(self):
         """원시 입력이 실제로 들어오고 있는지 초당 패킷 수로 보여준다."""
