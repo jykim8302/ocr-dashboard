@@ -1001,6 +1001,20 @@ except Exception as _ex:
     same, detail = False, repr(_ex)
 check("MouseTracer.bat 안의 프로그램이 원본과 같음", same, detail)
 
+
+print()
+print("=== 16. 펌웨어가 CircuitPython 에서 못 쓰는 문법을 안 쓰는지 ===")
+# 이 검사가 필요한 이유: 하네스는 일반 파이썬으로 돌아서
+# CircuitPython 에만 없는 기능은 통과해 버린다. 실제로 bytearray 의
+# del 을 쓰다가 보드에서만 터진 적이 있다.
+import re as _re
+for _name in ("code.py", "boot.py"):
+    _src = io.open(os.path.join(ROOT, "pico", _name), encoding="utf-8").read()
+    _dels = _re.findall(r"^\s*del\s+\w+\[", _src, _re.M)
+    check("%s 에 del 로 항목 지우기 없음" % _name, not _dels, str(_dels))
+    check("%s 에 f-문자열 없음" % _name,
+          not _re.search(r"""f["']""", _src), "")
+
 print()
 print("=" * 52)
 print("검사 항목 %d개" % ran[0])

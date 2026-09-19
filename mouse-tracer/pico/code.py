@@ -81,6 +81,7 @@ def to_signed(value):
 
 
 buf = bytearray()
+pos = 0             # 버퍼에서 어디까지 읽었는지
 held = 0            # 지금 눌려 있는 버튼
 pend_x = 0          # 아직 못 내보낸 이동량
 pend_y = 0
@@ -99,13 +100,15 @@ while True:
             buf.extend(port.read(waiting))
             led.value = not led.value
 
-            while len(buf) >= FRAME:
-                if buf[0] != SYNC:
-                    del buf[0]          # 묶음 시작이 아니면 밀어서 다시 찾는다
+            # CircuitPython 의 bytearray 는 del 을 지원하지 않는다.
+            # 그래서 지우는 대신 어디까지 읽었는지만 세어 둔다.
+            while len(buf) - pos >= FRAME:
+                if buf[pos] != SYNC:
+                    pos += 1            # 묶음 시작이 아니면 한 칸 밀어 다시 찾는다
                     continue
 
-                frame = bytes(buf[:FRAME])
-                del buf[:FRAME]
+                frame = bytes(buf[pos:pos + FRAME])
+                pos += FRAME
                 want = frame[3]
 
                 if want != held:
@@ -131,6 +134,10 @@ while True:
                 pend_x += to_signed(frame[1])
                 pend_y += to_signed(frame[2])
                 pend_w += to_signed(frame[4])
+
+            if pos:
+                buf = buf[pos:]         # 다 쓴 앞부분을 잘라 낸다
+                pos = 0
 
         if pend_x or pend_y or pend_w:
             cx = clamp(pend_x)
@@ -162,6 +169,7 @@ while True:
             said += 1
             say("ERR " + repr(err))
         buf = bytearray()
+        pos = 0
         pend_x = 0
         pend_y = 0
         pend_w = 0
