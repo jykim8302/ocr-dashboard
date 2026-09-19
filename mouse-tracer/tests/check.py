@@ -132,8 +132,12 @@ check("모든 값 범위 안", all(-127 <= (f[1]-256 if f[1]>127 else f[1]) <= 1
 print()
 print("=== 5. 피코 펌웨어 (pico/code.py 를 실제로 돌린다) ===")
 
-class _Stop(Exception):
-    """프레임을 다 먹인 뒤 펌웨어의 무한 루프를 빠져나오기 위한 신호."""
+class _Stop(BaseException):
+    """프레임을 다 먹인 뒤 펌웨어의 무한 루프를 빠져나오기 위한 신호.
+
+    펌웨어가 Exception 을 모두 잡아 계속 도는 구조라, 그 그물에 걸리지
+    않도록 BaseException 에서 갈라져 나온다.
+    """
 
 
 def run_firmware(frame_bytes):
@@ -149,14 +153,40 @@ def run_firmware(frame_bytes):
         def release(self, code): buttons.append(("release", code, len(moves)))
 
     class FakePort:
-        def __init__(self, data): self.data = bytearray(data)
+        """자료를 다 먹인 뒤에도 잠깐은 더 돌게 해 준다.
+
+        펌웨어는 한 바퀴에 한 조각씩만 내보내므로, 자료가 떨어지자마자
+        멈추면 아직 못 내보낸 이동량이 남는다. 실제 장치에서는 루프가
+        계속 도니 그 부분까지 보려면 빈 상태로 몇 바퀴 더 줘야 한다.
+        """
+        IDLE_ROUNDS = 50
+
+        def __init__(self, data):
+            self.data = bytearray(data)
+            self.idle = 0
+
         @property
         def in_waiting(self):
-            if not self.data:
+            if self.data:
+                self.idle = 0
+                return len(self.data)
+            self.idle += 1
+            if self.idle > self.IDLE_ROUNDS:
                 raise _Stop()
-            return len(self.data)
+            return 0
+
         def read(self, n):
             out = bytes(self.data[:n]); del self.data[:n]; return out
+
+    class FakePin:
+        pass
+
+    class FakeDirection:
+        OUTPUT = "output"
+        INPUT = "input"
+
+    class FakeDigitalInOut:
+        def __init__(self, pin): self.direction = None; self.value = False
 
     usb_cdc = types.ModuleType("usb_cdc"); usb_cdc.data = FakePort(frame_bytes)
     usb_hid = types.ModuleType("usb_hid"); usb_hid.devices = []
@@ -164,10 +194,16 @@ def run_firmware(frame_bytes):
     mouse_mod = types.ModuleType("adafruit_hid.mouse")
     mouse_mod.Mouse = FakeMouse
     pkg.mouse = mouse_mod
-    names = ("usb_cdc", "usb_hid", "adafruit_hid", "adafruit_hid.mouse")
+    board_mod = types.ModuleType("board"); board_mod.LED = FakePin()
+    digitalio_mod = types.ModuleType("digitalio")
+    digitalio_mod.DigitalInOut = FakeDigitalInOut
+    digitalio_mod.Direction = FakeDirection
+    names = ("usb_cdc", "usb_hid", "adafruit_hid", "adafruit_hid.mouse",
+             "board", "digitalio")
     saved = dict((n, sys.modules.get(n)) for n in names)
     sys.modules.update({"usb_cdc": usb_cdc, "usb_hid": usb_hid,
-                        "adafruit_hid": pkg, "adafruit_hid.mouse": mouse_mod})
+                        "adafruit_hid": pkg, "adafruit_hid.mouse": mouse_mod,
+                        "board": board_mod, "digitalio": digitalio_mod})
     try:
         fw_spec = importlib.util.spec_from_file_location(
             "pico_code", os.path.join(ROOT, "pico", "code.py"))
