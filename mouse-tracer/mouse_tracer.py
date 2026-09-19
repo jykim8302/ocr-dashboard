@@ -13,6 +13,7 @@
 import ctypes
 import datetime
 import json
+import math
 import os
 import queue
 import sys
@@ -138,6 +139,19 @@ ACTIONS = (("record", HOTKEY_RECORD, "녹화"),
            ("stop", HOTKEY_STOP, "정지"))
 
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_NOREPEAT = 0x01, 0x02, 0x04, 0x4000
+
+# 조합키가 눌렸는지 알아내려면 가상 키 코드를 봐야 한다.
+# 각 조합키는 통합 코드와 왼쪽/오른쪽 코드를 함께 가진다.
+MODIFIER_VKS = {
+    MOD_CONTROL: (0x11, 0xA2, 0xA3),
+    MOD_SHIFT: (0x10, 0xA0, 0xA1),
+    MOD_ALT: (0x12, 0xA4, 0xA5),
+}
+VK_TO_MODIFIER = dict((vk, bit) for bit, vks in MODIFIER_VKS.items()
+                      for vk in vks)
+
+
+
 
 # 단축키로 고를 수 있는 키 목록 (이름 -> 가상 키 코드)
 KEY_CODES = {}
@@ -517,6 +531,10 @@ def is_wow64():
 IS_WOW64 = is_wow64()
 
 
+MAX_SECONDS = 24 * 60 * 60     # 기록 길이의 상한 (하루)
+HOTKEY_TAIL_SECONDS = 0.5      # 이 시간 안에 남은 조합키는 단축키 흔적으로 본다
+
+
 def clean_events(raw):
     """불러온 기록이 쓸 수 있는 모양인지 본다. 아니면 None 을 돌려준다.
 
@@ -526,6 +544,30 @@ def clean_events(raw):
     if not isinstance(raw, list):
         return None
     out = []
+    # 각 칸이 Win32 구조체에 들어갈 수 있는 범위인지도 본다.
+    # 범위를 넘으면 재생하다 구조체에 넣을 때 터진다.
+    limits = {
+        # 진짜 마우스는 한 번에 -32768~32767 만 보고한다. 이보다 넓게
+        # 열어 두면 피코로 보낼 때 127 씩 쪼개다 수천만 번을 돌게 된다.
+        "m": ((-32768, 32767),           # 가로 이동량
+              (-32768, 32767),           # 세로 이동량
+              (0, 0xFFFF),               # 버튼 플래그
+              (-32768, 32767),           # 휠 양
+              (0, 0xFFFF)),              # 장치 플래그
+        # 태블릿이나 원격 데스크톱으로 녹화하면 이동량 자리에 화면
+        # 절대좌표가 들어온다. 모니터가 여러 대면 주 모니터 기준으로
+        # 환산되어 음수나 65535 를 넘는 값도 나온다. 재생할 때 들어가는
+        # 자리가 32비트라 그 범위까지 받는다. 이 경우는 피코로 보내지
+        # 않으므로 쪼개다 오래 걸릴 걱정도 없다.
+        "m_abs": ((-2 ** 31, 2 ** 31 - 1),
+                  (-2 ** 31, 2 ** 31 - 1),
+                  (0, 0xFFFF),
+                  (-32768, 32767),
+                  (0, 0xFFFF)),
+        "k": ((0, 0xFFFF),               # 스캔코드
+              (0, 0xFFFF),               # 키 플래그
+              (0, 0xFFFF)),              # 가상 키 코드
+    }
     for item in raw:
         if not isinstance(item, (list, tuple)) or not item:
             return None
@@ -533,20 +575,69 @@ def clean_events(raw):
         if not ((kind == "m" and len(item) == 7)
                 or (kind == "k" and len(item) == 5)):
             return None
-        for value in item[1:]:
+        # 시각만 소수가 될 수 있다. 이동량이나 키 코드에 소수가 들어가면
+        # 재생할 때 Win32 구조체에 넣다가 터진다.
+        # 이동량 범위를 정하려면 장치 플래그를 먼저 봐야 한다
+        rule = kind
+        if kind == "m":
+            flags = item[6]
+            # 뒤에서 제대로 확인하지만, 여기서 int() 로 바꾸다 터지면
+            # "손상된 기록" 안내로 넘어가지 못한다. 먼저 안전한지 본다.
+            if (not isinstance(flags, bool)
+                    and isinstance(flags, int)
+                    and flags & MOUSE_MOVE_ABSOLUTE):
+                rule = "m_abs"
+            elif isinstance(flags, float) and math.isfinite(flags):
+                if flags == int(flags) and int(flags) & MOUSE_MOVE_ABSOLUTE:
+                    rule = "m_abs"
+
+        row = [kind]
+        for index, value in enumerate(item[1:], start=1):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 return None
-        out.append(list(item))
+            if index == 1:
+                # 아주 큰 정수는 float 로 바꾸다 예외가 난다. 여기서는
+                # 무슨 값이 와도 던지지 않고 None 만 돌려줘야 한다.
+                try:
+                    moment = float(value)
+                except (OverflowError, ValueError):
+                    return None
+                # 시각은 재생할 때 기다리는 시간으로 쓰인다. 터무니없는
+                # 값이 들어오면 재생이 영원히 멈춘 것처럼 보인다.
+                if not math.isfinite(moment) or not 0 <= moment <= MAX_SECONDS:
+                    return None
+                row.append(moment)
+                continue
+            if isinstance(value, float):
+                if not math.isfinite(value) or value != int(value):
+                    return None      # 3.5 나 NaN 같은 값은 쓸 수 없다
+                value = int(value)
+            low, high = limits[rule][index - 2]
+            if not low <= value <= high:
+                return None
+            row.append(value)
+        out.append(row)
     return out
 
 
 def clean_start_pos(raw):
-    """저장된 시작 좌표가 쓸 만한지 본다."""
-    if (isinstance(raw, (list, tuple)) and len(raw) == 2
-            and all(not isinstance(v, bool) and isinstance(v, (int, float))
-                    for v in raw)):
-        return (int(raw[0]), int(raw[1]))
-    return None
+    """저장된 시작 좌표가 쓸 만한지 본다. 무슨 값이 와도 던지지 않는다."""
+    if not (isinstance(raw, (list, tuple)) and len(raw) == 2):
+        return None
+    out = []
+    for value in raw:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            if not math.isfinite(float(value)):
+                return None
+        except (OverflowError, ValueError):
+            return None
+        # 화면 좌표가 들어갈 자리는 32비트다
+        if not -2 ** 31 <= value <= 2 ** 31 - 1:
+            return None
+        out.append(int(value))
+    return (out[0], out[1])
 
 
 def to_signed16(v):
@@ -595,7 +686,8 @@ class Engine:
         self.log_q = queue.Queue()
         self.record_keyboard = True
         self.hotkeys = dict((k, list(v)) for k, v in DEFAULT_HOTKEYS.items())
-        self.hotkey_vks = set()   # 녹화에서 빼야 할 단축키의 키 코드
+        self.hotkey_vks = set()      # 단축키로 쓰는 키 코드 (녹화에서 뺀다)
+        self.hotkey_chords = []      # (키 코드, 조합키) 목록
         self.hwnd = None
         self.thread_id = None
         self._wndproc = None
@@ -659,7 +751,12 @@ class Engine:
     def stop_record(self):
         if not self.recording:
             return
-        self.recording = False
+        # 녹화 종료 표시와 정리를 한 자물쇠 안에서 한다. 표시만 밖에서
+        # 하면 기록 스레드가 이미 통과한 뒤라 마지막 입력을 흘릴 수 있다.
+        with self._lock:
+            self.recording = False
+            # 단축키를 누르느라 짝이 안 맞게 남은 조합키를 걷어낸다
+            self.events[:] = self.balance_hotkey_mods(list(self.events))
         self.log("녹화 종료. 이벤트 {}개 / {:.2f}초".format(
             len(self.events), self.duration()))
 
@@ -699,6 +796,12 @@ class Engine:
     def _handle_packet(self, raw):
         """RAWINPUT 한 개를 해석해 통계에 반영하고, 녹화 중이면 기록한다."""
         t = (time.perf_counter() - self._t0) if self.recording else 0.0
+        if self.recording and t > MAX_SECONDS:
+            # 불러올 때와 같은 상한을 녹화에도 건다. 이게 없으면 저장은
+            # 되는데 다시 불러오지 못하는 기록이 만들어진다.
+            self.log("기록이 하루를 넘어 녹화를 멈춥니다.")
+            self.stop_record()       # 자물쇠를 잡기 전에 부른다
+            return
 
         if raw.header.dwType == RIM_TYPEMOUSE:
             m = raw.data.mouse
@@ -731,9 +834,11 @@ class Engine:
             if m.lLastX or m.lLastY:
                 self.raw_dx, self.raw_dy = int(m.lLastX), int(m.lLastY)
             if self.recording and (m.lLastX or m.lLastY or bf):
-                self.events.append(["m", round(t, 6), int(m.lLastX),
-                                    int(m.lLastY), int(bf), int(bd),
-                                    int(m.usFlags)])
+                with self._lock:
+                    if self.recording:   # 자물쇠 안에서 다시 확인
+                        self.events.append(["m", round(t, 6), int(m.lLastX),
+                                            int(m.lLastY), int(bf), int(bd),
+                                            int(m.usFlags)])
 
         elif raw.header.dwType == RIM_TYPEKEYBOARD:
             k = raw.data.keyboard
@@ -742,14 +847,19 @@ class Engine:
                 self.inj_hdevice = int(raw.header.hDevice or 0)
                 return
             self.raw_packets += 1
+            vkey = int(k.VKey)
+            mod_bit = VK_TO_MODIFIER.get(vkey, 0)
+
             if not (self.recording and self.record_keyboard):
                 return
-            if k.VKey in self.hotkey_vks:
-                return  # 단축키는 기록하지 않는다
+            if self._is_hotkey_key(vkey, mod_bit):
+                return  # 단축키를 누른 것은 기록하지 않는다
             if k.MakeCode == 0:
                 return
-            self.events.append(["k", round(t, 6), int(k.MakeCode),
-                                int(k.Flags), int(k.VKey)])
+            with self._lock:
+                if self.recording:       # 자물쇠 안에서 다시 확인
+                    self.events.append(["k", round(t, 6), int(k.MakeCode),
+                                        int(k.Flags), int(k.VKey)])
 
     def _drain_buffer(self):
         """GetRawInputBuffer 로 쌓인 원시 패킷을 한 번에 모두 가져온다.
@@ -865,6 +975,7 @@ class Engine:
         for _key, hid, _label in ACTIONS:
             user32.UnregisterHotKey(self.hwnd, hid)
         self.hotkey_vks = set()
+        self.hotkey_chords = []
         ok, bad = [], []
         for key, hid, label in ACTIONS:
             entry = self.hotkeys.get(key) or DEFAULT_HOTKEYS[key]
@@ -876,6 +987,7 @@ class Engine:
             mods = int(entry[1]) | MOD_NOREPEAT
             if user32.RegisterHotKey(self.hwnd, hid, mods, vk):
                 ok.append(shown)
+                self.hotkey_chords.append((vk, int(entry[1])))
                 self.hotkey_vks.add(vk)
             else:
                 bad.append(shown)
@@ -890,7 +1002,78 @@ class Engine:
         if self.hwnd:
             user32.PostMessageW(self.hwnd, WM_APP_REHOTKEY, 0, 0)
 
+    def _is_hotkey_key(self, vkey, mod_bit):
+        """이 키가 단축키로 쓰는 키라서 기록에서 빼야 하는지 본다.
+
+        조합키가 붙어 있든 아니든, 단축키의 본체 키는 무조건 뺀다.
+        "지금 Ctrl 이 눌려 있나" 를 보고 가려내는 방법도 생각했지만,
+        원시 입력은 한꺼번에 몰려 들어올 때가 있어서 그 시점의 조합키
+        상태를 알 수 없다. 한 번이라도 어긋나면 단축키 키가 기록에 남고,
+        재생할 때 그 키가 단축키를 다시 눌러 재생이 스스로 멈춘다.
+        그래서 안전한 쪽을 택한다. 대신 단축키로 고른 키는 녹화에
+        담기지 않으므로, 녹화할 프로그램에서 쓰지 않는 키로 고르는 게 좋다.
+
+        조합키(Ctrl 등) 자체는 여기서 빼지 않는다. 녹화 중 평소에 쓰는
+        Ctrl 까지 사라지면 기록이 망가진다. 단축키 때문에 짝이 안 맞게
+        남은 조합키는 녹화를 끝낼 때 한 번에 걷어낸다.
+        """
+        if mod_bit:
+            return False
+        return vkey in self.hotkey_vks
+
+    def hotkey_modifier_vks(self):
+        """지금 단축키가 쓰는 조합키의 가상 키 코드 모음."""
+        vks = set()
+        for _vk, mods in self.hotkey_chords:
+            for bit, codes in MODIFIER_VKS.items():
+                if mods & bit:
+                    vks.update(codes)
+        return vks
+
+    def balance_hotkey_mods(self, events):
+        """짝이 맞지 않는 조합키 입력을 걷어낸 기록을 돌려준다.
+
+        조합키가 붙은 단축키로 녹화를 시작하거나 멈추면, 누름 없는 뗌이나
+        뗌 없는 누름이 기록에 남는다. 그대로 재생하면 Ctrl 이 눌린 채로
+        돌아간다. 단축키가 쓰는 조합키에 대해서만 손본다.
+        """
+        watch = self.hotkey_modifier_vks()
+        if not watch:
+            return events
+        # 짝 없는 누름은 기록 끝자락에 있는 것만 단축키 흔적으로 본다.
+        # "뒤에 아무것도 없을 때만" 으로 잡으면, 정지 단축키를 누른 뒤
+        # 마우스 패킷 하나만 끼어도 놓쳐 버린다. 그래서 시각으로 본다.
+        # 가운데에서 눌린 채로 이어지는 조합키는 사용자가 일부러 누르고
+        # 있는 것이므로(Ctrl+클릭 같은 경우) 건드리지 않는다.
+        last_moment = 0.0
+        for ev in events:
+            if isinstance(ev[1], (int, float)) and ev[1] > last_moment:
+                last_moment = float(ev[1])
+        tail_from = last_moment - HOTKEY_TAIL_SECONDS
+
+        drop = set()
+        open_down = {}          # (스캔코드, 확장키) -> 아직 안 떼진 누름들
+        for index, ev in enumerate(events):
+            if ev[0] != "k" or ev[4] not in watch:
+                continue
+            slot = (ev[2], bool(ev[3] & RI_KEY_E0))
+            if ev[3] & RI_KEY_BREAK:
+                if open_down.pop(slot, None):
+                    continue                 # 짝이 맞았다
+                # 누른 적 없는 키의 뗌은 어디에 있든 의미가 없다
+                drop.add(index)
+            else:
+                # 키를 길게 누르면 같은 누름이 여러 번 들어온다. 전부 모은다.
+                open_down.setdefault(slot, []).append(index)
+        for pending in open_down.values():
+            # 기록 끝자락에 남은 누름만 단축키 흔적으로 본다
+            drop.update(i for i in pending if events[i][1] >= tail_from)
+        if not drop:
+            return events
+        return [ev for index, ev in enumerate(events) if index not in drop]
+
     def _on_hotkey(self, hid):
+
         if hid == HOTKEY_RECORD:
             self.stop_record() if self.recording else self.start_record()
         elif hid == HOTKEY_PLAY:
@@ -949,16 +1132,20 @@ class Engine:
         self._pico_flush_t = time.perf_counter()
         if not (dx or dy or wheel or self.pico_btn != self._pico_sent_btn):
             return
-        self._pico_sent_btn = self.pico_btn
-        if not self.pico.write(pico_frames(dx, dy, self.pico_btn, wheel)):
-            self.use_pico = False
-            self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
-            if self.pico_btn:
-                # 버튼이 눌린 채로 남으면 프로그램을 꺼도 계속 눌려 있다.
-                # 한 번은 놓기를 시도한다.
-                self.pico.write(pico_frames(0, 0, 0, 0))
-                self.pico_btn = 0
-                self._pico_sent_btn = 0
+        if self.pico.write(pico_frames(dx, dy, self.pico_btn, wheel)):
+            self._pico_sent_btn = self.pico_btn
+            return
+        # 보내기가 실패했다. 보드가 어떤 상태인지 알 수 없으므로,
+        # 버튼을 놓는 신호를 무조건 한 번 더 보낸다. 성공했다고 미리
+        # 적어 두면 버튼을 놓는 신호가 실패했을 때 아무도 되돌리지 않는다.
+        self.use_pico = False
+        self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+        released = self.pico.write(pico_frames(0, 0, 0, 0))
+        self.pico_btn = 0
+        if released:
+            self._pico_sent_btn = 0
+        # 놓기까지 실패했으면 _pico_sent_btn 을 그대로 둬서
+        # 재생이 끝날 때 한 번 더 놓기를 시도하게 한다
 
     def _emit_pico(self, batch):
         """재생 입력을 피코로 넘겨 진짜 마우스가 움직이게 한다.
@@ -1297,10 +1484,12 @@ class Engine:
             winmm.timeBeginPeriod(1)
             if precise:
                 self._disable_accel()
-            total = repeat if repeat > 0 else -1
+            # 창에는 0 만 무한이라고 적혀 있다. 음수를 무한으로 돌리면
+            # 실수로 -1 을 넣었을 때 멈출 때까지 계속 돈다.
+            total = repeat if repeat > 0 else (-1 if repeat == 0 else 1)
             count = 0
             self.log("재생 시작 ({}회, {}배속). 정지는 {} 또는 {}".format(
-                "무한" if repeat <= 0 else repeat, speed,
+                "무한" if total < 0 else total, speed,
                 hotkey_text(self.hotkeys["play"]),
                 hotkey_text(self.hotkeys["stop"])))
             while total < 0 or count < total:
@@ -1418,9 +1607,15 @@ class Engine:
             self.log("기록 내용이 손상되어 불러오지 않았습니다. "
                      "지금 기록은 그대로 둡니다.")
             return
-        # 여기까지 통과한 뒤에야 바꿔 넣는다
+        raw_start = data.get("start_pos")
+        start = clean_start_pos(raw_start)
+        # 기록이 멀쩡하면 시작 좌표만 깨졌다고 버리지는 않는다.
+        # 좌표는 없어도 되고, 없으면 그 자리에서 바로 재생한다.
+        if raw_start is not None and start is None:
+            self.log("시작 위치 정보가 손상되어 무시했습니다. "
+                     "기록은 정상입니다.")
         self.events = events
-        self.start_pos = clean_start_pos(data.get("start_pos"))
+        self.start_pos = start
         self.log("불러옴: {} (이벤트 {}개 / {:.2f}초)".format(
             os.path.basename(path), len(self.events), self.duration()))
 
@@ -1677,6 +1872,19 @@ class App:
             self.hk_key[key].set(cur[0])
             for bit, var in self.hk_mod[key].items():
                 var.set(bool(int(cur[1]) & bit))
+
+        # 같은 조합이 둘 이상이면 하나가 등록에 실패하는데, 그러면 남 탓을
+        # 하는 로그가 뜬다. 겹치면 전부 기본값으로 되돌린다.
+        combos = [(v[0], v[1]) for v in self.eng.hotkeys.values()]
+        if len(set(combos)) < len(combos):
+            self.eng.hotkeys = dict((k, list(v))
+                                    for k, v in DEFAULT_HOTKEYS.items())
+            for key, _hid, _label in ACTIONS:
+                cur = self.eng.hotkeys[key]
+                self.hk_key[key].set(cur[0])
+                for bit, var in self.hk_mod[key].items():
+                    var.set(bool(int(cur[1]) & bit))
+            self.eng.log("저장된 단축키가 서로 겹쳐서 기본값으로 되돌렸습니다.")
 
         for name, var in (("repeat", self.repeat), ("speed", self.speed),
                           ("gap", self.gap), ("pico_port", self.port_var)):

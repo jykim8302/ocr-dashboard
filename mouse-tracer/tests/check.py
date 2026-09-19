@@ -37,7 +37,9 @@ mt = importlib.util.module_from_spec(spec); spec.loader.exec_module(mt)
 os.name = real
 
 fails = []
+ran = [0]
 def check(name, ok, detail=""):
+    ran[0] += 1
     print(("  통과  " if ok else "  실패  ") + name + (" :: " + detail if detail else ""))
     if not ok: fails.append(name)
 
@@ -224,7 +226,11 @@ mt.user32.UnregisterHotKey = lambda h, i: 1
 e4.hotkeys = {"record": ["F9", mt.MOD_CONTROL], "play": ["숫자패드 1", 0], "stop": ["F8", 0]}
 e4._register_hotkeys()
 check("모든 키 코드 유효", all(n in mt.KEY_CODES for n in mt.KEY_NAMES), "")
-check("성공한 것만 녹화에서 제외", e4.hotkey_vks == {0x78, 0x61}, str(sorted(map(hex, e4.hotkey_vks))))
+check("성공한 것만 기억함 (조합키까지)",
+      e4.hotkey_chords == [(0x78, mt.MOD_CONTROL), (0x61, 0)],
+      str(e4.hotkey_chords))
+check("등록 실패한 것은 목록에 없음",
+      all(vk != 0x77 for vk, _m in e4.hotkey_chords), str(e4.hotkey_chords))
 check("반복 입력 방지 플래그", all(m & mt.MOD_NOREPEAT for _, m, _ in reg), "")
 check("표시 글자", mt.hotkey_text(["F6", mt.MOD_CONTROL | mt.MOD_SHIFT]) == "Ctrl+Shift+F6", "")
 
@@ -238,7 +244,8 @@ mt.save_settings(cfg)
 check("왕복 일치", mt.load_settings() == cfg, "")
 mt.SETTINGS_FILE = os.path.join(d, "없는파일.json")
 check("파일 없으면 빈 값", mt.load_settings() == {}, "")
-open(os.path.join(d, "깨짐.json"), "w").write("{이건 json 이 아님")
+with open(os.path.join(d, "깨짐.json"), "w") as _f:
+    _f.write("{이건 json 이 아님")
 mt.SETTINGS_FILE = os.path.join(d, "깨짐.json")
 check("깨진 파일도 안 죽음", mt.load_settings() == {}, "")
 
@@ -343,7 +350,8 @@ fa.sync_opts = lambda: None
 fa.root = R()
 import json as _json
 bad = os.path.join(d, "bad.json")
-_json.dump({"hotkeys": ["F6", "F7"], "repeat": 3}, open(bad, "w"))
+with open(bad, "w") as _f:
+    _json.dump({"hotkeys": ["F6", "F7"], "repeat": 3}, _f)
 mt.SETTINGS_FILE = bad
 try:
     mt.App.load_saved(fa); ok = True; why = ""
@@ -444,7 +452,8 @@ for broken in ({"hotkeys": {"record": ["F6", "Ctrl"]}},
     fb.sync_opts = lambda: None
     fb.root = R()
     bp = os.path.join(d, "b.json")
-    _json.dump(broken, open(bp, "w"))
+    with open(bp, "w") as _f:
+        _json.dump(broken, _f)
     mt.SETTINGS_FILE = bp
     fb.load_saved()
     check("망가진 설정 %s -> 기본값" % str(broken)[:34],
@@ -552,8 +561,8 @@ good = [["m", 0.1, 1, 1, 0, 0, 0]]
 for broken in ([[]], ["x"], [["m", 0.1, 1]], [["k", 0.1, 1, 2]],
                [["m", 0.1, 1, 1, 0, 0, "x"]], "문자열", [["z", 0.1, 1, 1, 0, 0, 0]]):
     bp = os.path.join(d, "broken.json")
-    _json.dump({"version": 1, "events": broken, "start_pos": [1, 2]},
-               open(bp, "w"))
+    with open(bp, "w") as _f:
+        _json.dump({"version": 1, "events": broken, "start_pos": [1, 2]}, _f)
     eb = mt.Engine(); eb.events = [list(good[0])]
     eb.load(bp)
     ok_keep = eb.events == good
@@ -690,8 +699,270 @@ check("저장 실패 시 False", ok is False, str(ok))
 check("저장 실패를 로그에 남김", any("저장 실패" in l for l in logs), str(logs))
 check("정상 저장은 True", es2.save(os.path.join(d, "ok.json")) is True, "")
 
+
+print()
+print("=== 14. 다섯 번째 전체 검토에서 나온 것들 (재발 방지) ===")
+
+# 14-1) 이동량이나 키 코드에 소수가 들어오면 안 된다
+check("정수는 통과", mt.clean_events([["m", 0.5, 3, -2, 0, 0, 0]]) is not None, "")
+check("시각은 소수여도 됨",
+      mt.clean_events([["m", 0.123456, 1, 1, 0, 0, 0]]) is not None, "")
+coerced = mt.clean_events([["m", 0.5, 3.0, -2.0, 0, 0, 0]])
+check("정수와 같은 소수는 정수로 바꿈",
+      coerced is not None and coerced[0][2] == 3 and isinstance(coerced[0][2], int),
+      str(coerced))
+check("3.5 같은 값은 거부", mt.clean_events([["m", 0.5, 3.5, 0, 0, 0, 0]]) is None, "")
+check("키 코드 소수도 거부",
+      mt.clean_events([["k", 0.5, 30.5, 0, 65]]) is None, "")
+# 실제로 재생까지 해본다 (예전에는 여기서 터졌다)
+ef2 = mt.Engine()
+sent3 = []
+mt.send = lambda b: (sent3.extend(b), len(b))[1]
+fp = os.path.join(d, "float.json")
+with open(fp, "w") as _f:
+    _json.dump({"version": 1, "events": [["m", 0.0, 3.0, -2.0, 0, 0, 0]],
+                "start_pos": [1, 2]}, _f)
+ef2.load(fp)
+ef2._play_worker(1, 1.0, False, False, 0)
+logs = []
+while not ef2.log_q.empty(): logs.append(ef2.log_q.get())
+check("소수로 저장된 기록도 재생됨",
+      not any("재생 오류" in l for l in logs) and len(sent3) >= 1,
+      " ".join(logs)[:90])
+
+# 14-2) 조합키가 붙은 단축키를 조합 상태까지 보고 거른다
+eh = mt.Engine()
+eh.hotkey_chords = [(0x75, mt.MOD_CONTROL)]     # Ctrl+F6
+eh.hotkey_vks = {0x75}
+check("단축키 본체 키는 기록에서 뺌", eh._is_hotkey_key(0x75, 0), "")
+check("다른 키는 그대로 기록", not eh._is_hotkey_key(0x76, 0), "")
+check("조합키 자체는 여기서 안 거름",
+      not eh._is_hotkey_key(0xA2, mt.MOD_CONTROL), "")
+# 조합키가 붙은 단축키도 본체 키가 목록에 들어가야 한다. 이게 빠지면
+# 그 키가 기록에 남고, 재생할 때 단축키를 다시 눌러 재생이 멈춘다.
+eh3 = mt.Engine(); eh3.hwnd = 1
+mt.user32.RegisterHotKey = lambda h, i, m, v: 1
+mt.user32.UnregisterHotKey = lambda h, i: 1
+eh3.hotkeys = {"record": ["F6", mt.MOD_CONTROL], "play": ["F7", 0],
+               "stop": ["F8", mt.MOD_ALT | mt.MOD_SHIFT]}
+eh3._register_hotkeys()
+check("조합키 붙은 단축키도 본체 키를 등록",
+      eh3.hotkey_vks == {0x75, 0x76, 0x77}, str(sorted(map(hex, eh3.hotkey_vks))))
+
+# 짝이 안 맞는 조합키는 녹화를 끝낼 때 걷어낸다.
+# "기록 끝자락" 은 시각으로 판단하므로 검사 데이터에도 시각을 분명히 둔다.
+def CTRL_DOWN(t): return ["k", t, 29, 0, 0xA2]
+def CTRL_UP(t): return ["k", t, 29, mt.RI_KEY_BREAK, 0xA2]
+def MOUSE(t): return ["m", t, 1, 1, 0, 0, 0]
+def CLICK(t): return ["m", t, 0, 0, 0x0001, 0, 0]
+END = 10.0                      # 기록의 끝 시각
+TAIL = END - 0.1                # 끝자락 (단축키 흔적으로 볼 구간)
+MID = 1.0                       # 가운데 (일부러 누른 것)
+
+def balanced(events, chords=((0x75, mt.MOD_CONTROL),)):
+    eb = mt.Engine()
+    eb.hotkey_chords = list(chords)
+    return eb.balance_hotkey_mods([list(x) for x in events])
+
+out = balanced([MOUSE(MID), CTRL_UP(END)])
+check("누른 적 없는 뗌은 지움", out == [MOUSE(MID)], str(out))
+out = balanced([MOUSE(MID), CTRL_DOWN(TAIL), MOUSE(END)])
+check("끝자락에 남은 누름은 지움 (뒤에 마우스가 더 와도)",
+      out == [MOUSE(MID), MOUSE(END)], str(out))
+out = balanced([CTRL_DOWN(0.1), MOUSE(END)])
+check("가운데서 눌린 채 이어지면 살림 (일부러 누른 것)",
+      out == [CTRL_DOWN(0.1), MOUSE(END)], str(out))
+out = balanced([CTRL_DOWN(0.1), MOUSE(MID), CTRL_UP(END)])
+check("짝이 맞으면 그대로 둠", len(out) == 3, str(out))
+
+# 마우스가 초당 수백 개씩 끼어들어도 짝을 맞춰야 한다
+flood = ([CTRL_DOWN(0.1)] + [MOUSE(0.5)] * 500 + [CTRL_UP(0.9)]
+         + [MOUSE(5.0)] * 500 + [CTRL_DOWN(TAIL)] + [MOUSE(END)])
+out = balanced(flood)
+keys = [e for e in out if e[0] == "k"]
+check("마우스가 몰려와도 짝을 맞춤",
+      len(out) == len(flood) - 1 and len(keys) == 2
+      and not (keys[0][3] & mt.RI_KEY_BREAK)
+      and bool(keys[1][3] & mt.RI_KEY_BREAK),
+      "%d -> %d, 남은 키 %s" % (len(flood), len(out), keys))
+check("마우스 기록은 하나도 안 지움",
+      len([e for e in out if e[0] == "m"]) == 1001, "")
+
+# 키를 길게 누르면 같은 누름이 여러 번 들어온다
+out = balanced([MOUSE(MID), CTRL_DOWN(TAIL), CTRL_DOWN(TAIL), CTRL_DOWN(END)])
+check("끝자락에 길게 누른 것도 전부 지움", out == [MOUSE(MID)], str(out))
+out = balanced([CTRL_DOWN(0.1), CTRL_DOWN(0.2), MOUSE(MID), CTRL_UP(END)])
+check("길게 누르고 떼면 그대로 둠", len(out) == 4, str(out))
+
+# 일부러 누르고 있는 조합키는 살려야 한다 (Ctrl+클릭)
+out = balanced([CTRL_UP(0.05), CTRL_DOWN(0.1), CLICK(MID), MOUSE(END)])
+check("Ctrl+클릭의 Ctrl 은 살림",
+      out == [CTRL_DOWN(0.1), CLICK(MID), MOUSE(END)], str(out))
+out = balanced([CTRL_DOWN(0.1), CLICK(MID), CTRL_DOWN(TAIL), MOUSE(END)])
+check("가운데 누름은 살리고 끝자락만 지움",
+      out == [CTRL_DOWN(0.1), CLICK(MID), MOUSE(END)], str(out))
+out = balanced([CTRL_UP(0.05), CLICK(MID), CTRL_UP(END)])
+check("누른 적 없는 뗌은 위치와 무관하게 다 지움",
+      out == [CLICK(MID)], str(out))
+out = balanced([CTRL_DOWN(TAIL), MOUSE(END)], chords=((0x75, 0),))
+check("조합키 안 쓰는 단축키면 손대지 않음", len(out) == 2, str(out))
+
+es3 = mt.Engine()
+es3.hotkey_chords = [(0x75, mt.MOD_CONTROL)]
+es3.recording = True
+es3.events = [MOUSE(MID), CTRL_DOWN(END)]
+es3.stop_record()
+check("녹화를 끝낼 때 자동으로 정리", es3.events == [MOUSE(MID)],
+      str(es3.events))
+
+# 저장은 되는데 못 불러오는 기록이 생기지 않아야 한다
+check("녹화 상한이 불러오기 상한과 같음",
+      mt.clean_events([["m", mt.MAX_SECONDS, 1, 1, 0, 0, 0]]) is not None
+      and mt.clean_events([["m", mt.MAX_SECONDS + 1, 1, 1, 0, 0, 0]]) is None,
+      "상한 %s초" % mt.MAX_SECONDS)
+
+# --- 값 범위와 손상된 값 (앞선 검토들에서 나온 것들) ---
+check("아주 큰 시각도 예외 없이 거부",
+      mt.clean_events([["m", 10 ** 400, 1, 1, 0, 0, 0]]) is None, "")
+check("시각이 음수면 거부",
+      mt.clean_events([["m", -1.0, 1, 1, 0, 0, 0]]) is None, "")
+check("시각이 하루를 넘으면 거부",
+      mt.clean_events([["m", 1e18, 1, 1, 0, 0, 0]]) is None, "")
+check("하루 안이면 통과",
+      mt.clean_events([["m", 86399.0, 1, 1, 0, 0, 0]]) is not None, "")
+check("장치 플래그가 NaN 이어도 예외 없이 거부",
+      mt.clean_events([["m", 0.1, 1, 1, 0, 0, float("nan")]]) is None, "")
+check("이동량이 범위를 넘으면 거부",
+      mt.clean_events([["m", 0.1, 2 ** 40, 1, 0, 0, 0]]) is None, "")
+check("버튼 플래그가 범위를 넘으면 거부",
+      mt.clean_events([["m", 0.1, 1, 1, 0x1FFFF, 0, 0]]) is None, "")
+check("키 코드가 범위를 넘으면 거부",
+      mt.clean_events([["k", 0.1, 70000, 0, 65]]) is None, "")
+check("범위 안이면 통과",
+      mt.clean_events([["m", 0.1, -32768, 32767, 0xFFFF, -120, 0]])
+      is not None, "")
+check("32767 은 통과",
+      mt.clean_events([["m", 0.1, 32767, -32768, 0, 0, 0]]) is not None, "")
+check("32768 은 거부",
+      mt.clean_events([["m", 0.1, 32768, 0, 0, 0, 0]]) is None, "")
+# 태블릿이나 원격 데스크톱 기록은 이동량 자리에 화면 절대좌표가 들어온다
+check("절대좌표 기록은 65535 까지 통과",
+      mt.clean_events([["m", 0.0, 40000, 50000, 0, 0,
+                        mt.MOUSE_MOVE_ABSOLUTE]]) is not None, "")
+check("절대좌표는 모니터 배치상 음수도 허용",
+      mt.clean_events([["m", 0.0, -5000, 70000, 0, 0,
+                        mt.MOUSE_MOVE_ABSOLUTE]]) is not None, "")
+check("절대좌표 아닌데 40000 이면 거부",
+      mt.clean_events([["m", 0.0, 40000, 0, 0, 0, 0]]) is None, "")
+
+# --- 시작 좌표 ---
+check("시작 좌표 NaN 거부",
+      mt.clean_start_pos([float("nan"), 0]) is None, "")
+check("시작 좌표 무한대 거부",
+      mt.clean_start_pos([float("inf"), 0]) is None, "")
+check("시작 좌표 너무 큰 값 거부",
+      mt.clean_start_pos([1e30, 0]) is None, "")
+check("시작 좌표 정상값 통과",
+      mt.clean_start_pos([640, 480.0]) == (640, 480), "")
+eb2 = mt.Engine(); eb2.events = [["m", 0.1, 1, 1, 0, 0, 0]]
+badpos = os.path.join(d, "badpos.json")
+with io.open(badpos, "w", encoding="utf-8") as _f:
+    _f.write('{"version":1,"events":[["m",0.0,5,5,0,0,0]],'
+             '"start_pos":[NaN,0]}')
+eb2.load(badpos)
+logs = []
+while not eb2.log_q.empty(): logs.append(eb2.log_q.get())
+check("좌표만 깨지면 기록은 살리고 좌표는 버림",
+      eb2.events == [["m", 0.0, 5, 5, 0, 0, 0]] and eb2.start_pos is None,
+      "%s / %s" % (eb2.events, eb2.start_pos))
+check("좌표를 버렸다고 알려줌", any("시작 위치" in l for l in logs), str(logs))
+
+# --- 피코: 버튼 놓는 신호가 실패해도 되돌릴 길이 남아야 한다 ---
+rel_writes = []
+class ReleaseFailLink:
+    handle = 1
+    name = "COM9"
+    def __init__(self): self.n = 0
+    def write(self, dd):
+        self.n += 1
+        rel_writes.append(bytes(dd))
+        return self.n == 1          # 첫 번째(누름)만 성공
+    def close(self): pass
+erf = mt.Engine(); erf.pico = ReleaseFailLink(); erf.use_pico = True
+erf.pico_btn = 0x01
+erf._pico_flush()                   # 누름 전달 (성공)
+erf.pico_btn = 0
+erf.use_pico = True
+erf._pico_flush()                   # 놓기 전달 (실패)
+check("놓기가 실패하면 한 번 더 시도",
+      len(rel_writes) >= 3 and rel_writes[-1][3] == 0, str(rel_writes))
+check("놓기까지 실패하면 되돌릴 표시를 남김",
+      erf._pico_sent_btn != 0, str(erf._pico_sent_btn))
+
+check("NaN 이 들어와도 거부",
+      mt.clean_events([["m", float("nan"), 1, 1, 0, 0, 0]]) is None, "")
+check("무한대도 거부",
+      mt.clean_events([["m", 0.1, float("inf"), 1, 0, 0, 0]]) is None, "")
+
+# 14-3) 음수 반복은 무한이 아니라 한 번
+sent4 = []
+mt.send = lambda b: (sent4.extend(b), len(b))[1]
+en2 = mt.Engine()
+en2.events = [["m", 0.0, 1, 0, 0, 0, 0]]
+en2._play_worker(-1, 1.0, False, False, 0)
+check("반복 -1 은 한 번만", len(sent4) == 1, "%d번 보냄" % len(sent4))
+sent4.clear()
+en2._play_worker(3, 1.0, False, False, 0)
+check("반복 3 은 세 번", len(sent4) == 3, "%d번 보냄" % len(sent4))
+
+# 14-4) 저장된 단축키가 겹치면 기본값으로 되돌린다
+fd = mt.App.__new__(mt.App)
+fd.eng = mt.Engine()
+fd.hk_key = dict((k, V()) for k, _h, _l in mt.ACTIONS)
+fd.hk_mod = dict((k, dict((b, V()) for b in (mt.MOD_CONTROL, mt.MOD_ALT,
+                                             mt.MOD_SHIFT)))
+                 for k, _h, _l in mt.ACTIONS)
+for n in ("repeat", "speed", "gap", "port_var", "v_kbd", "v_goto", "v_prec"):
+    setattr(fd, n, V())
+fd.sync_opts = lambda: None
+fd.root = R()
+dup = os.path.join(d, "dup.json")
+with open(dup, "w") as _f:
+    _json.dump({"hotkeys": {"record": ["F9", 0], "play": ["F9", 0],
+                        "stop": ["F8", 0]}}, _f)
+mt.SETTINGS_FILE = dup
+fd.load_saved()
+combos = [tuple(v) for v in fd.eng.hotkeys.values()]
+check("겹치면 기본값으로", len(set(combos)) == 3 and combos[0] == ("F6", 0),
+      str(fd.eng.hotkeys))
+logs = []
+while not fd.eng.log_q.empty(): logs.append(fd.eng.log_q.get())
+check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
+
+
+print()
+print("=== 15. 실행 파일이 지금 코드를 품고 있는지 ===")
+import base64 as _b64, hashlib as _hashlib
+bat_path = os.path.join(ROOT, "MouseTracer.bat")
+try:
+    _raw = io.open(bat_path, encoding="ascii", newline="").read().split("\r\n")
+    _i = _raw.index("#####PAYLOAD#####")
+    _payload = _b64.b64decode("".join(x for x in _raw[_i + 1:] if x))
+    _source = io.open(TARGET, "rb").read()
+    same = _payload == _source
+    detail = "" if same else ("실행 파일 안 %d바이트(%s) vs 원본 %d바이트(%s). "
+                              "페이로드를 다시 만들어야 한다."
+                              % (len(_payload),
+                                 _hashlib.md5(_payload).hexdigest()[:8],
+                                 len(_source),
+                                 _hashlib.md5(_source).hexdigest()[:8]))
+except Exception as _ex:
+    same, detail = False, repr(_ex)
+check("MouseTracer.bat 안의 프로그램이 원본과 같음", same, detail)
+
 print()
 print("=" * 52)
+print("검사 항목 %d개" % ran[0])
 if fails:
     print("실패한 항목 %d개:" % len(fails))
     for f_ in fails: print("  -", f_)
