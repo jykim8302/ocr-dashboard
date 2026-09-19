@@ -119,7 +119,12 @@ MOUSEEVENTF_XUP = 0x0100
 
 # 피코(USB 장치)로 보낼 때 쓰는 값
 PICO_SYNC = 0xAB
+GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
+# 시리얼 제어선. 이걸 켜지 않으면 상대 장치가 데이터를 받지 않는다.
+SETRTS, SETDTR = 3, 5
+# DCB 플래그: fBinary(0비트) + DTR 켜기(4비트) + RTS 켜기(12비트)
+DCB_BINARY_DTR_RTS = 0x1 | (1 << 4) | (1 << 12)
 OPEN_EXISTING = 3
 INVALID_HANDLE = (1 << (8 * ctypes.sizeof(ctypes.c_void_p))) - 1
 
@@ -388,11 +393,15 @@ kernel32.CloseHandle.argtypes = [HANDLE]
 kernel32.GetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
 kernel32.SetCommState.argtypes = [HANDLE, ctypes.POINTER(DCB)]
 kernel32.SetCommTimeouts.argtypes = [HANDLE, ctypes.POINTER(COMMTIMEOUTS)]
+kernel32.EscapeCommFunction.argtypes = [HANDLE, DWORD]
+kernel32.EscapeCommFunction.restype = BOOL
+kernel32.SetCommState.restype = BOOL
+kernel32.GetCommState.restype = BOOL
 
 
-def _open_com(name):
+def _open_com(name, access=GENERIC_WRITE):
     """COM 포트를 열어 핸들을 돌려준다. 실패하면 None."""
-    h = kernel32.CreateFileW("\\\\.\\" + name, GENERIC_WRITE, 0, None,
+    h = kernel32.CreateFileW("\\\\.\\" + name, access, 0, None,
                              OPEN_EXISTING, 0, None)
     if not h or h == INVALID_HANDLE:
         return None
@@ -454,12 +463,17 @@ class PicoLink:
     def __init__(self):
         self.handle = None
         self.name = None
+        self.last_error = ""
+        self.setup_note = ""
 
     def open(self, name):
         self.close()
-        h = _open_com(name)
+        # 읽기 권한까지 함께 연다. 쓰기만 열면 제어선을 못 바꾸는
+        # 드라이버가 있다.
+        h = _open_com(name, GENERIC_READ | GENERIC_WRITE)
         if not h:
             return False
+        self.setup_note = ""
         try:
             dcb = DCB()
             dcb.DCBlength = ctypes.sizeof(DCB)
@@ -468,11 +482,20 @@ class PicoLink:
             dcb.ByteSize = 8
             dcb.Parity = 0
             dcb.StopBits = 0
-            kernel32.SetCommState(h, ctypes.byref(dcb))
-            to = COMMTIMEOUTS(0, 0, 0, 0, 200)
+            # DTR 과 RTS 를 켠다. 이게 꺼져 있으면 상대 장치가 포트를
+            # 열린 것으로 보지 않아서 보낸 자료를 가져가지 않고,
+            # 보내기가 시간 초과로 실패한다.
+            dcb.flags = DCB_BINARY_DTR_RTS
+            if not kernel32.SetCommState(h, ctypes.byref(dcb)):
+                self.setup_note = "설정 적용 실패({})".format(
+                    ctypes.get_last_error())
+            # 드라이버에 따라 DCB 만으로 안 되는 경우가 있어 직접 한 번 더
+            kernel32.EscapeCommFunction(h, SETDTR)
+            kernel32.EscapeCommFunction(h, SETRTS)
+            to = COMMTIMEOUTS(0, 0, 0, 0, 1000)
             kernel32.SetCommTimeouts(h, ctypes.byref(to))
-        except Exception:
-            pass
+        except Exception as e:
+            self.setup_note = str(e)
         self.handle = h
         self.name = name
         return True
@@ -482,9 +505,20 @@ class PicoLink:
             return False
         written = DWORD(0)
         buf = ctypes.create_string_buffer(bytes(data))
+        ctypes.set_last_error(0)
         ok = kernel32.WriteFile(self.handle, buf, len(data),
                                 ctypes.byref(written), None)
-        return bool(ok) and written.value == len(data)
+        if ok and written.value == len(data):
+            self.last_error = ""
+            return True
+        if ok:
+            # 오류는 아닌데 다 못 보냈다. 상대가 가져가지 않아 시간 초과된
+            # 경우다. DTR 이 꺼져 있거나 장치가 멈춰 있을 때 이렇게 된다.
+            self.last_error = "시간 초과 ({}/{}바이트만 나감)".format(
+                written.value, len(data))
+        else:
+            self.last_error = "오류 코드 {}".format(ctypes.get_last_error())
+        return False
 
     def close(self):
         if self.handle:
@@ -1139,7 +1173,8 @@ class Engine:
         # 버튼을 놓는 신호를 무조건 한 번 더 보낸다. 성공했다고 미리
         # 적어 두면 버튼을 놓는 신호가 실패했을 때 아무도 되돌리지 않는다.
         self.use_pico = False
-        self.log("피코로 보내기 실패. 일반 방식으로 되돌립니다.")
+        self.log("피코로 보내기 실패({}). 일반 방식으로 "
+                 "되돌립니다.".format(getattr(self.pico, "last_error", "") or "원인 불명"))
         released = self.pico.write(pico_frames(0, 0, 0, 0))
         self.pico_btn = 0
         if released:
@@ -1968,8 +2003,10 @@ class App:
                 return
             if self.eng.pico.open(name):
                 self.eng.use_pico = True
+                note = getattr(self.eng.pico, "setup_note", "")
                 self.eng.log("피코 연결됨: {}. 이제 재생이 진짜 USB "
-                             "마우스로 나갑니다.".format(name))
+                             "마우스로 나갑니다.{}".format(
+                                 name, " (" + note + ")" if note else ""))
             else:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
@@ -1998,7 +2035,9 @@ class App:
             for dx, dy in ((5, 0), (0, 5), (-5, 0), (0, -5)):
                 for _ in range(20):
                     if not self.eng.pico.write(pico_frames(dx, dy, 0, 0)):
-                        self.eng.log("보내기 실패. 포트를 다시 확인하세요.")
+                        self.eng.log("보내기 실패: {}. 포트를 다시 "
+                                     "확인하세요.".format(
+                                         getattr(self.eng.pico, "last_error", "") or "원인 불명"))
                         return
                     time.sleep(0.008)
             self.eng.log("보냈습니다. 커서가 네모를 그렸으면 성공입니다.")
