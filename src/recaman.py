@@ -25,13 +25,25 @@ def recaman(n):
 
 
 def main():
-    # 사용법: python src/recaman.py [개수]   (기본 20개)
+    # 사용법: python src/recaman.py [개수] [저장할 파일]   (기본 20개, 화면 출력)
+    #   예) python src/recaman.py 1000000 recaman.txt   -> 한 줄에 한 항씩 파일로 저장
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 20
+    out_path = sys.argv[2] if len(sys.argv) > 2 else None
+
+    seq = recaman(n)
 
     print("=" * 60)
     print(f" 레카만 수열 - 처음 {n}개 항")
     print("=" * 60)
-    print(", ".join(str(x) for x in recaman(n)))
+
+    if out_path:
+        with open(out_path, "w") as f:
+            f.write("\n".join(str(x) for x in seq) + "\n")
+        print(f"-> {out_path} 에 저장 완료")
+        if seq:
+            print(f"-> 마지막 항: {seq[-1]}, 가장 큰 값: {max(seq)}")
+    else:
+        print(", ".join(str(x) for x in seq))
 
 
 if __name__ == "__main__":
