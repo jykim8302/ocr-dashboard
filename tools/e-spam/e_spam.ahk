@@ -1,8 +1,8 @@
 ; ============================================================
 ;  E 연타 매크로 (AutoHotkey v2)
-;  - F13 : 켜기 / 끄기
+;  - F12 : 켜기 / 끄기
 ;  - 켜진 상태에서 마우스 왼쪽 버튼을 누르고 있는 동안 E 를 연타
-;  - F12 : 프로그램 종료
+;  - Ctrl+F12 : 프로그램 종료
 ; ============================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
@@ -17,14 +17,14 @@ A_MaxHotkeysPerInterval := 1000
 
 켜짐 := false
 
-F13:: {
+F12:: {
     global 켜짐
     켜짐 := !켜짐
     ToolTip 켜짐 ? "E 연타: ON" : "E 연타: OFF"
     SetTimer () => ToolTip(), -1000
 }
 
-F12::ExitApp
+^F12::ExitApp
 
 #HotIf 켜짐
 ~LButton:: {                   ; ~ : 원래 좌클릭도 그대로 동작
