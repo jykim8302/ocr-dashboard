@@ -20,8 +20,6 @@ A_MaxHotkeysPerInterval := 1000
 F12:: {
     global 켜짐
     켜짐 := !켜짐
-    ToolTip 켜짐 ? "E 연타: ON" : "E 연타: OFF"
-    SetTimer () => ToolTip(), -1000
 }
 
 ^F12::ExitApp
