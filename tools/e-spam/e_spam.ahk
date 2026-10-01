@@ -44,7 +44,7 @@ OnExit 종료정리
     global 켜짐
     켜짐 := !켜짐
     if !켜짐
-        SendInput "{Blind}{vk45 up}"
+        SendInput "{Blind^}{vk45 up}"
     화면갱신()
 }
 
@@ -78,12 +78,12 @@ $^F12::ExitApp
 *~LButton:: {                  ; * : Ctrl/Shift/Alt 를 누르고 있어도 작동, ~ : 원래 좌클릭도 그대로 동작
     ; 눌렀다 → 잠깐 대기 → 뗐다 → 잠깐 대기
     ; (대기 없이 보내면 입력이 밀려서 렉이 걸리고, 손을 떼도 한동안 눌림)
-    ; {Blind} : Shift 등을 누르고 있어도 풀지 않음
+    ; {Blind^} : Ctrl 은 잠깐 떼고 E 만 입력 (Shift/Alt 는 그대로)
     ; vk45    : 한/영 상태와 상관없이 E 키 그대로 입력
     while 켜짐 && GetKeyState("LButton", "P") {
-        SendInput "{Blind}{vk45 down}"
+        SendInput "{Blind^}{vk45 down}"
         Sleep 간격
-        SendInput "{Blind}{vk45 up}"
+        SendInput "{Blind^}{vk45 up}"
         Sleep 간격
     }
 }
