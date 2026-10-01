@@ -9,13 +9,27 @@
 ;@Ahk2Exe-SetName E 연타
 ;@Ahk2Exe-SetDescription E 연타 매크로
 
-SendMode "Input"               ; 가장 빠른 입력 방식
-A_MaxHotkeysPerInterval := 1000
-
 ; ---- 설정 ---------------------------------------------------
-간격 := 1      ; 연타 간격(ms). 0 = 한계 속도.
-               ; 게임이 입력을 놓치면 10 ~ 20 으로 늘려 보세요.
+간격 := 0      ; 연타 간격(ms). 0 = 쉬지 않고 최대 속도.
+               ; 게임이 입력을 놓치면 1 ~ 10 으로 늘려 보세요.
 ; ------------------------------------------------------------
+
+; 관리자 권한으로 다시 실행 (관리자 권한 게임에도 입력이 들어가도록)
+if !A_IsAdmin {
+    try {
+        Run '*RunAs "' (A_IsCompiled ? A_ScriptFullPath : A_AhkPath '" "' A_ScriptFullPath) '"'
+        ExitApp
+    }
+}
+
+; ---- 속도 최적화 --------------------------------------------
+SendMode "Input"
+ListLines False
+KeyHistory 0
+A_MaxHotkeysPerInterval := 10000
+ProcessSetPriority "High"
+DllCall("winmm\timeBeginPeriod", "UInt", 1)   ; Sleep 을 1ms 단위로 정확하게
+OnExit (*) => DllCall("winmm\timeEndPeriod", "UInt", 1)
 
 켜짐 := false
 
@@ -31,7 +45,7 @@ A_MaxHotkeysPerInterval := 1000
 버튼.OnEvent("Click", (*) => 전환())
 창.OnEvent("Close", (*) => ExitApp())
 화면갱신()
-창.Show("x20 y20")
+창.Show("x20 y20 NoActivate")
 
 전환() {
     global 켜짐
@@ -46,14 +60,21 @@ A_MaxHotkeysPerInterval := 1000
 }
 
 ; ---- 단축키 -------------------------------------------------
-F12::전환()
-^F12::ExitApp
+$F12::전환()
+$^F12::ExitApp
 
 #HotIf 켜짐 && !WinActive("ahk_id " 창.Hwnd)   ; 상태 창 클릭할 땐 연타 안 함
 ~LButton:: {                   ; ~ : 원래 좌클릭도 그대로 동작
-    while 켜짐 && GetKeyState("LButton", "P") {
-        Send "e"
-        Sleep 간격
+    ; {Blind} : Shift 등을 누르고 있어도 풀지 않음
+    ; vk45    : 한/영 상태와 상관없이 E 키 그대로 입력
+    if 간격 > 0 {
+        while 켜짐 && GetKeyState("LButton", "P") {
+            SendInput "{Blind}{vk45}"
+            Sleep 간격
+        }
+    } else {
+        while 켜짐 && GetKeyState("LButton", "P")
+            SendInput "{Blind}{vk45}"
     }
 }
 #HotIf
