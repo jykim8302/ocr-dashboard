@@ -18,7 +18,7 @@ DllCall("winmm\timeBeginPeriod", "UInt", 1)   ; Sleep 을 1ms 단위로 정확�
 OnExit 종료정리
 
 설정파일 := A_ScriptDir "\e_spam.ini"
-간격 := Integer(IniRead(설정파일, "설정", "간격", 4))   ; ms. 누른 시간 = 뗀 시간 = 간격
+간격 := Integer(IniRead(설정파일, "설정", "간격", 8))   ; ms (8 = 초당 약 60회). 누른 시간 = 뗀 시간 = 간격
 간격 := Max(1, Min(30, 간격))
 켜짐 := false
 
