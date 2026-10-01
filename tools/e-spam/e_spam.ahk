@@ -3,26 +3,23 @@
 ;  - F12      : 켜기 / 끄기
 ;  - 켜진 상태에서 마우스 왼쪽 버튼을 누르고 있는 동안 E 를 연타
 ;  - Ctrl+F12 : 프로그램 종료 (상태 창의 X 로도 종료)
+;  - 연타 속도는 상태 창의 슬라이더로 조절 (자동 저장)
 ; ============================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
 ;@Ahk2Exe-SetName E 연타
 ;@Ahk2Exe-SetDescription E 연타 매크로
 
-; ---- 설정 ---------------------------------------------------
-간격 := 0      ; 연타 간격(ms). 0 = 쉬지 않고 최대 속도.
-               ; 게임이 입력을 놓치면 1 ~ 10 으로 늘려 보세요.
-; ------------------------------------------------------------
-
-; ---- 속도 최적화 --------------------------------------------
 SendMode "Input"
 ListLines False
 KeyHistory 0
 A_MaxHotkeysPerInterval := 10000
-ProcessSetPriority "High"
 DllCall("winmm\timeBeginPeriod", "UInt", 1)   ; Sleep 을 1ms 단위로 정확하게
-OnExit (*) => DllCall("winmm\timeEndPeriod", "UInt", 1)
+OnExit 종료정리
 
+설정파일 := A_ScriptDir "\e_spam.ini"
+간격 := Integer(IniRead(설정파일, "설정", "간격", 4))   ; ms. 누른 시간 = 뗀 시간 = 간격
+간격 := Max(1, Min(30, 간격))
 켜짐 := false
 
 ; ---- 상태 창 ------------------------------------------------
@@ -32,16 +29,22 @@ OnExit (*) => DllCall("winmm\timeEndPeriod", "UInt", 1)
 상태 := 창.Add("Text", "w220 h60 Center +0x200 cWhite", "")   ; 0x200 = 세로 가운데
 창.SetFont("s10 norm")
 버튼 := 창.Add("Button", "w220 h32", "켜기 / 끄기  (F12)")
+속도글 := 창.Add("Text", "w220 Center", "")
+슬라이더 := 창.Add("Slider", "w220 Range1-30 Invert", 간격)   ; 왼쪽 = 느림, 오른쪽 = 빠름
 창.SetFont("s9")
-창.Add("Text", "w220 Center cGray", "좌클릭 누르는 동안 E 연타`nCtrl+F12 또는 X = 종료")
+창.Add("Text", "w220 Center cGray", "좌클릭 누르는 동안 E 연타`n렉/씹힘 → 슬라이더를 왼쪽으로`nCtrl+F12 또는 X = 종료")
 버튼.OnEvent("Click", (*) => 전환())
+슬라이더.OnEvent("Change", 속도변경)
 창.OnEvent("Close", (*) => ExitApp())
 화면갱신()
+속도글갱신()
 창.Show("x20 y20 NoActivate")
 
 전환() {
     global 켜짐
     켜짐 := !켜짐
+    if !켜짐
+        SendInput "{Blind}{vk45 up}"
     화면갱신()
 }
 
@@ -51,22 +54,37 @@ OnExit (*) => DllCall("winmm\timeEndPeriod", "UInt", 1)
     상태.Redraw()
 }
 
+속도변경(*) {
+    global 간격
+    간격 := 슬라이더.Value
+    속도글갱신()
+    try IniWrite 간격, 설정파일, "설정", "간격"
+}
+
+속도글갱신() {
+    속도글.Text := "속도: 초당 약 " Round(1000 / (간격 * 2)) "회"
+}
+
+종료정리(*) {
+    SendInput "{Blind}{vk45 up}"
+    DllCall("winmm\timeEndPeriod", "UInt", 1)
+}
+
 ; ---- 단축키 -------------------------------------------------
 $F12::전환()
 $^F12::ExitApp
 
 #HotIf 켜짐 && !WinActive("ahk_id " 창.Hwnd)   ; 상태 창 클릭할 땐 연타 안 함
 ~LButton:: {                   ; ~ : 원래 좌클릭도 그대로 동작
+    ; 눌렀다 → 잠깐 대기 → 뗐다 → 잠깐 대기
+    ; (대기 없이 보내면 입력이 밀려서 렉이 걸리고, 손을 떼도 한동안 눌림)
     ; {Blind} : Shift 등을 누르고 있어도 풀지 않음
     ; vk45    : 한/영 상태와 상관없이 E 키 그대로 입력
-    if 간격 > 0 {
-        while 켜짐 && GetKeyState("LButton", "P") {
-            SendInput "{Blind}{vk45}"
-            Sleep 간격
-        }
-    } else {
-        while 켜짐 && GetKeyState("LButton", "P")
-            SendInput "{Blind}{vk45}"
+    while 켜짐 && GetKeyState("LButton", "P") {
+        SendInput "{Blind}{vk45 down}"
+        Sleep 간격
+        SendInput "{Blind}{vk45 up}"
+        Sleep 간격
     }
 }
 #HotIf
