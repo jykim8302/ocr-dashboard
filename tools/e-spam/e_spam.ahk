@@ -14,14 +14,6 @@
                ; 게임이 입력을 놓치면 1 ~ 10 으로 늘려 보세요.
 ; ------------------------------------------------------------
 
-; 관리자 권한으로 다시 실행 (관리자 권한 게임에도 입력이 들어가도록)
-if !A_IsAdmin {
-    try {
-        Run '*RunAs "' (A_IsCompiled ? A_ScriptFullPath : A_AhkPath '" "' A_ScriptFullPath) '"'
-        ExitApp
-    }
-}
-
 ; ---- 속도 최적화 --------------------------------------------
 SendMode "Input"
 ListLines False
