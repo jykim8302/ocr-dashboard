@@ -1873,6 +1873,7 @@ class App:
 
         self._pico_rx = b""
         self._pico_greeted = False
+        self._pico_wait_t = 0.0
         self._rate_t = time.perf_counter()
         self._rate_n = 0
         self._rate = 0
@@ -2090,10 +2091,10 @@ class App:
                              "마우스로 나갑니다.{}".format(
                                  name, " (" + note + ")" if note else ""))
                 # 펌웨어는 PC 가 말을 걸 때까지 1초마다 인사를 되풀이한다.
-                # 아무것도 안 움직이는 묶음을 하나 보내 "왔다" 고 알려서
-                # 인사를 멈추게 한다. 안 그러면 로그가 1초마다 도배된다.
+                # 인사를 받고 나서 멈추라고 해야 한다. 여기서 바로 멈추라고
+                # 하면 인사할 틈이 없어져서 어떤 펌웨어인지 영영 모른다.
                 self._pico_greeted = False
-                self.eng.pico.write(pico_frames(0, 0, 0, 0))
+                self._pico_wait_t = time.perf_counter()
             else:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
@@ -2203,6 +2204,7 @@ class App:
         except Exception:
             return
         if not chunk:
+            self._check_pico_quiet()
             return
         self._pico_rx += chunk
         if len(self._pico_rx) > 4096:          # 줄바꿈이 안 오면 버린다
@@ -2213,6 +2215,30 @@ class App:
             if text:
                 self._say_pico_line(text)
 
+    def _hush_pico(self):
+        """아무것도 안 움직이는 묶음을 하나 보내 인사를 멈추게 한다."""
+        try:
+            self.eng.pico.write(pico_frames(0, 0, 0, 0))
+        except Exception:
+            pass
+
+    def _check_pico_quiet(self):
+        """인사가 안 오면 어떤 펌웨어인지 알 수 없다고 알려 준다.
+
+        옛 펌웨어는 켜질 때 한 번만 인사해서, PC 가 포트를 열 즈음에는
+        이미 지나가 버린다. 그래서 조용한 것 자체가 단서가 된다.
+        """
+        if self._pico_greeted:
+            return
+        if time.perf_counter() - self._pico_wait_t < 3.0:
+            return
+        self._pico_greeted = True
+        self._hush_pico()
+        self.eng.log("피코가 어떤 펌웨어인지 알려주지 않았습니다. 옛 "
+                     "방식일 수 있습니다. 움직임이 부자연스럽거나 클릭이 "
+                     "길면 pico 폴더의 boot.py 와 code.py 를 다시 "
+                     "복사하세요.")
+
     def _say_pico_line(self, text):
         """피코가 보낸 한 줄을 알아듣기 쉬운 말로 바꿔 로그에 남긴다."""
         if text.startswith("READY"):
@@ -2221,6 +2247,7 @@ class App:
             if self._pico_greeted:
                 return
             self._pico_greeted = True
+            self._hush_pico()
             if "16" in text.split():
                 self.eng.log("피코 펌웨어: 큰 걸음 방식. 빠르게 움직여도 "
                              "밀리지 않습니다.")
@@ -2231,6 +2258,7 @@ class App:
                              "복사하세요.")
             return
         if text.startswith("MOUSE FAIL"):
+            self._pico_greeted = True
             why = text.split("MOUSE FAIL", 1)[1].strip()
             self.eng.log("피코가 마우스를 못 만들었습니다{}. adafruit_hid "
                          "라이브러리를 lib 폴더에 넣었는지 먼저 "

@@ -1214,13 +1214,30 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 print()
 print("=== 14-2. 피코가 보낸 말 알아듣기 ===")
 
-def say_lines(lines):
-    """창이 피코의 말 몇 줄을 받았을 때 로그에 뭐가 남는지 본다."""
+class HushLink:
+    """인사를 멈추라는 묶음이 갔는지 세는 가짜 피코."""
+    def __init__(s): s.writes = []; s.handle = 1; s.name = "COM9"
+    def write(s, dd): s.writes.append(bytes(dd)); return True
+    def read(s, size=512): return b""
+    def close(s): pass
+
+
+def new_app():
     app = mt.App.__new__(mt.App)
     app.eng = mt.Engine()
+    app.eng.pico = HushLink()
     app._pico_greeted = False
+    app._pico_wait_t = time.perf_counter()
+    app._pico_rx = b""
+    return app
+
+
+def say_lines(lines):
+    """창이 피코의 말 몇 줄을 받았을 때 로그에 뭐가 남는지 본다."""
+    app = new_app()
     for one in lines:
         app._say_pico_line(one)
+    say_lines.app = app
     out = []
     while not app.eng.log_q.empty():
         out.append(app.eng.log_q.get())
@@ -1248,8 +1265,37 @@ check("오류는 되풀이해도 다 적음", len(_errs) == 3, str(_errs))
 _src_app = io.open(TARGET, encoding="utf-8").read()
 check("피코를 읽는 곳이 하나뿐", _src_app.count("pico.read()") + _src_app.count("link.read()") == 1,
       "읽는 곳 %d군데" % (_src_app.count("pico.read()") + _src_app.count("link.read()")))
-check("연결하면 인사를 멈추라고 한 묶음 보냄",
-      "self.eng.pico.write(pico_frames(0, 0, 0, 0))" in _src_app, "")
+
+# 인사를 받은 뒤에야 "그만해도 된다" 고 알려야 한다. 연결하자마자
+# 멈추라고 하면 인사할 틈이 없어져서 어떤 펌웨어인지 영영 모른다.
+say_lines(["READY 16"])
+check("인사를 받은 뒤에 멈추라고 보냄",
+      say_lines.app.eng.pico.writes == [mt.pico_frames(0, 0, 0, 0)],
+      str(say_lines.app.eng.pico.writes))
+
+_quiet = new_app()
+_quiet._pico_wait_t = time.perf_counter()
+_quiet.poll_pico()
+_q1 = []
+while not _quiet.eng.log_q.empty():
+    _q1.append(_quiet.eng.log_q.get())
+check("인사를 기다리는 동안은 조용히 둠", _q1 == [] and not _quiet._pico_greeted,
+      str(_q1))
+
+# 옛 펌웨어는 켜질 때 한 번만 인사해서 PC 가 열 즈음엔 이미 지나갔다.
+# 조용한 것 자체가 단서이므로, 한참 기다려도 안 오면 알려 줘야 한다.
+_quiet._pico_wait_t -= 3.5
+_quiet.poll_pico()
+_q2 = []
+while not _quiet.eng.log_q.empty():
+    _q2.append(_quiet.eng.log_q.get())
+check("한참 조용하면 옛 방식일 수 있다고 알려줌",
+      len(_q2) == 1 and "옛 방식" in _q2[0], str(_q2))
+_quiet.poll_pico()
+_q3 = []
+while not _quiet.eng.log_q.empty():
+    _q3.append(_quiet.eng.log_q.get())
+check("그 안내도 한 번만 적음", _q3 == [], str(_q3))
 
 print("=== 15. 실행 파일이 지금 코드를 품고 있는지 ===")
 import base64 as _b64, hashlib as _hashlib
