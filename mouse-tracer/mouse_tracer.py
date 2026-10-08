@@ -1872,6 +1872,7 @@ class App:
                                                 fill="x", padx=3)
 
         self._pico_rx = b""
+        self._pico_greeted = False
         self._rate_t = time.perf_counter()
         self._rate_n = 0
         self._rate = 0
@@ -2088,8 +2089,11 @@ class App:
                 self.eng.log("피코 연결됨: {}. 이제 재생이 진짜 USB "
                              "마우스로 나갑니다.{}".format(
                                  name, " (" + note + ")" if note else ""))
-                threading.Thread(target=self._greet_pico_worker,
-                                 daemon=True).start()
+                # 펌웨어는 PC 가 말을 걸 때까지 1초마다 인사를 되풀이한다.
+                # 아무것도 안 움직이는 묶음을 하나 보내 "왔다" 고 알려서
+                # 인사를 멈추게 한다. 안 그러면 로그가 1초마다 도배된다.
+                self._pico_greeted = False
+                self.eng.pico.write(pico_frames(0, 0, 0, 0))
             else:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
@@ -2102,49 +2106,6 @@ class App:
             self.eng.use_pico = False
             self.eng.pico.close()
             self.eng.log("피코 연결을 끊었습니다.")
-
-    def _greet_pico_worker(self):
-        """피코가 보내는 인사를 읽어서 어느 펌웨어인지 알려 준다.
-
-        펌웨어는 첫 자료를 받기 전까지 1초마다 인사를 되풀이하므로,
-        잠깐 기다렸다 읽으면 반드시 한 줄은 들어온다.
-        """
-        try:
-            opened = self.eng.pico.name
-            text = ""
-            for _ in range(12):               # 최대 약 2.4초
-                time.sleep(0.2)
-                if self.eng.pico.name != opened:
-                    return      # 그 사이에 포트를 닫거나 바꿨다
-                got = self.eng.pico.read()
-                if got:
-                    text += got.decode("utf-8", "replace")
-                if "READY" in text or "FAIL" in text:
-                    break
-            if "MOUSE FAIL" in text:
-                # 보드가 알려 준 원인을 그대로 보여 준다. adafruit_hid 가
-                # 없을 때가 가장 흔하지만, 다른 원인일 수도 있다.
-                why = ""
-                for line in text.splitlines():
-                    if "MOUSE FAIL" in line:
-                        why = line.split("MOUSE FAIL", 1)[1].strip()
-                        break
-                self.eng.log("피코가 마우스를 못 만들었습니다{}. "
-                             "adafruit_hid 라이브러리를 lib 폴더에 "
-                             "넣었는지 먼저 확인하세요.".format(
-                                 ": " + why[:120] if why else ""))
-            elif "READY 16" in text:
-                self.eng.log("피코 펌웨어: 큰 걸음 방식. 빠르게 움직여도 "
-                             "밀리지 않습니다.")
-            elif "READY 8" in text:
-                self.eng.log("피코 펌웨어가 옛 방식입니다. 빠른 구간에서 "
-                             "움직임이 밀리고 클릭이 길어집니다. "
-                             "pico 폴더의 boot.py 와 code.py 를 피코에 "
-                             "다시 복사하세요.")
-            elif text.strip():
-                self.eng.log("피코가 보낸 말: {}".format(text.strip()[:200]))
-        except Exception:
-            pass          # 인사를 못 읽는 것 자체는 문제가 아니다
 
     def test_pico(self):
         if not self.eng.pico.handle:
@@ -2250,7 +2211,32 @@ class App:
             line, self._pico_rx = self._pico_rx.split(b"\n", 1)
             text = line.decode("utf-8", "replace").strip()
             if text:
-                self.eng.log("피코: " + text)
+                self._say_pico_line(text)
+
+    def _say_pico_line(self, text):
+        """피코가 보낸 한 줄을 알아듣기 쉬운 말로 바꿔 로그에 남긴다."""
+        if text.startswith("READY"):
+            # 인사는 PC 가 말을 걸 때까지 되풀이된다. 그대로 다 적으면
+            # 로그가 도배되므로, 연결 한 번에 한 줄만 적는다.
+            if self._pico_greeted:
+                return
+            self._pico_greeted = True
+            if "16" in text.split():
+                self.eng.log("피코 펌웨어: 큰 걸음 방식. 빠르게 움직여도 "
+                             "밀리지 않습니다.")
+            else:
+                self.eng.log("피코 펌웨어가 옛 방식입니다. 빠른 구간에서 "
+                             "움직임이 밀리고 클릭이 길어집니다. pico "
+                             "폴더의 boot.py 와 code.py 를 피코에 다시 "
+                             "복사하세요.")
+            return
+        if text.startswith("MOUSE FAIL"):
+            why = text.split("MOUSE FAIL", 1)[1].strip()
+            self.eng.log("피코가 마우스를 못 만들었습니다{}. adafruit_hid "
+                         "라이브러리를 lib 폴더에 넣었는지 먼저 "
+                         "확인하세요.".format(": " + why[:120] if why else ""))
+            return
+        self.eng.log("피코: " + text)
 
     def update_raw_info(self):
         """원시 입력이 실제로 들어오고 있는지 초당 패킷 수로 보여준다."""

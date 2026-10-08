@@ -1212,48 +1212,45 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 
 
 print()
-print("=== 14-2. 피코 펌웨어 종류 알려주기 ===")
+print("=== 14-2. 피코가 보낸 말 알아듣기 ===")
 
-class FakePico:
-    """인사 한 줄을 돌려주는 가짜 피코."""
-    def __init__(s, text, name="COM9"):
-        s.text, s.name, s.handle = text.encode("utf-8"), name, 1
-    def read(s, size=512):
-        out, s.text = s.text, b""
-        return out
+def say_lines(lines):
+    """창이 피코의 말 몇 줄을 받았을 때 로그에 뭐가 남는지 본다."""
+    app = mt.App.__new__(mt.App)
+    app.eng = mt.Engine()
+    app._pico_greeted = False
+    for one in lines:
+        app._say_pico_line(one)
+    out = []
+    while not app.eng.log_q.empty():
+        out.append(app.eng.log_q.get())
+    return out
 
-ga = mt.App.__new__(mt.App)
-for _text, _want, _label in (
-        ("READY 16\n", "큰 걸음", "큰 걸음 펌웨어를 알아봄"),
-        ("READY 8\n", "다시 복사", "옛 펌웨어면 다시 복사하라고 알려줌"),
-        ("MOUSE FAIL OSError('보드가 말한 원인')\n", "보드가 말한 원인", "보드가 말한 원인을 그대로 보여줌"),
-        ("ERR something\n", "ERR something", "모르는 말은 그대로 보여줌")):
-    ga.eng = mt.Engine()
-    ga.eng.pico = FakePico(_text)
-    ga._greet_pico_worker()
-    _lines = []
-    while not ga.eng.log_q.empty():
-        _lines.append(ga.eng.log_q.get())
-    _log = " ".join(_lines)
-    check(_label, _want in _log, _log[-90:])
+for _lines, _want, _label in (
+        (["READY 16"], "큰 걸음", "큰 걸음 펌웨어를 알아봄"),
+        (["READY 8"], "다시 복사", "옛 펌웨어면 다시 복사하라고 알려줌"),
+        (["MOUSE FAIL OSError('왜인지')"], "왜인지",
+         "마우스를 못 만든 원인을 그대로 보여줌"),
+        (["ERR something"], "ERR something", "모르는 말은 그대로 보여줌")):
+    _log = say_lines(_lines)
+    check(_label, any(_want in m for m in _log), str(_log)[-110:])
 
-# 기다리는 동안 포트를 닫거나 바꾸면 더 읽지 않는다
-# (이미 닫힌 손잡이를 다시 쓰지 않게 하려는 것)
-class SwapPico(FakePico):
-    def read(s, size=512):
-        s.name = "COM11"          # 기다리는 사이에 포트가 바뀌었다
-        return b""
+# 펌웨어는 PC 가 말을 걸 때까지 1초마다 인사를 되풀이한다.
+# 그대로 다 적으면 로그가 도배된다 (실제로 그랬다).
+_flood = say_lines(["READY 16"] * 30)
+check("같은 인사를 되풀이해도 한 줄만 적음", len(_flood) == 1, str(_flood))
+# 인사가 아닌 말은 되풀이해도 다 적어야 한다 (오류를 놓치면 안 된다)
+_errs = say_lines(["ERR 1", "ERR 2", "ERR 3"])
+check("오류는 되풀이해도 다 적음", len(_errs) == 3, str(_errs))
 
-ga.eng = mt.Engine()
-ga.eng.pico = SwapPico("", name="COM9")
-ga._greet_pico_worker()
-_lines = []
-while not ga.eng.log_q.empty():
-    _lines.append(ga.eng.log_q.get())
-check("포트가 바뀌면 인사를 읽지 않음",
-      not any("펌웨어" in m for m in _lines), str(_lines))
+# 읽는 곳은 하나뿐이어야 한다. 둘이면 서로 먼저 가져가려고 싸워서
+# 해석된 문장 대신 날것이 찍힌다 (실제로 그랬다).
+_src_app = io.open(TARGET, encoding="utf-8").read()
+check("피코를 읽는 곳이 하나뿐", _src_app.count("pico.read()") + _src_app.count("link.read()") == 1,
+      "읽는 곳 %d군데" % (_src_app.count("pico.read()") + _src_app.count("link.read()")))
+check("연결하면 인사를 멈추라고 한 묶음 보냄",
+      "self.eng.pico.write(pico_frames(0, 0, 0, 0))" in _src_app, "")
 
-print()
 print("=== 15. 실행 파일이 지금 코드를 품고 있는지 ===")
 import base64 as _b64, hashlib as _hashlib
 bat_path = os.path.join(ROOT, "MouseTracer.bat")
