@@ -30,6 +30,7 @@ import usb_cdc
 import usb_hid
 
 SYNC = 0xAB
+ASK = 0xAC          # "어떤 펌웨어냐" 고 묻는 묶음의 시작 표시
 FRAME = 5
 BLINK = 0.5
 FAST_LIMIT = 32767      # 큰 걸음 마우스가 한 보고에 담을 수 있는 양
@@ -201,6 +202,17 @@ while True:
             # CircuitPython 의 bytearray 는 del 을 지원하지 않는다.
             # 그래서 지우는 대신 어디까지 읽었는지만 세어 둔다.
             while len(buf) - pos >= FRAME:
+                if (buf[pos] == ASK and buf[pos + 1] == 0
+                        and buf[pos + 2] == 0 and buf[pos + 3] == 0
+                        and buf[pos + 4] == 0):
+                    # PC 가 "어떤 펌웨어냐" 고 물었다. 언제 물어도 답한다.
+                    # 한 번 인사한 뒤에도 답해야, 프로그램을 다시 켤 때마다
+                    # 피코를 뺐다 꽂지 않아도 된다.
+                    pos += FRAME
+                    say(greeting)
+                    greeted = True
+                    continue
+
                 if buf[pos] != SYNC:
                     pos += 1            # 묶음 시작이 아니면 한 칸 밀어 다시 찾는다
                     continue

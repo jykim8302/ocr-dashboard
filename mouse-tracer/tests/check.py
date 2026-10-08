@@ -345,6 +345,27 @@ for _b in range(0, 8):
 check("PC 가 보내는 버튼 값은 0~7 뿐",
       _btn_bytes == set(range(8)), str(sorted(_btn_bytes)))
 
+# 8-4-3) PC 가 물으면 언제든 어떤 펌웨어인지 답해야 한다.
+#        보드는 PC 가 말을 걸면 인사를 멈추는데, 그 뒤 프로그램을 다시
+#        켜면 물어볼 길이 없어서 피코를 뺐다 꽂아야 했다 (실제로 그랬다).
+_ask = bytes(mt.PICO_ASK)
+run_firmware(mt.pico_frames(1, 0, 0, 0) + _ask, fast=True)
+_said = [b for b in run_firmware.said if b.startswith(b"READY")]
+check("한 번 말을 건 뒤에 물어도 답함", len(_said) >= 2,
+      str(run_firmware.said[:4]))
+check("답에 큰 걸음이라고 적혀 있음",
+      _said and _said[-1].strip() == b"READY 16", str(_said[-1:]))
+
+# 물어보는 묶음은 움직임이 아니다. 커서가 움직이면 안 된다.
+_am, _ab = run_firmware(_ask, fast=True)
+check("물어보는 묶음으로는 안 움직임",
+      all(m == (0, 0, 0) for m in _am) and _ab == [], str(_am[:3]))
+
+# 옛 펌웨어는 0xAC 를 모른다. 그래도 뒤에 오는 진짜 묶음은 살아야 한다.
+_om, _ob = run_firmware(_ask + mt.pico_frames(7, -5, 0, 0), fast=False)
+check("옛 펌웨어도 물음표 뒤의 움직임을 살림",
+      (sum(m[0] for m in _om), sum(m[1] for m in _om)) == (7, -5), str(_om))
+
 # 8-5) boot.py 가 만든 "큰 걸음 마우스" 가 있으면 그걸 골라 쓴다.
 #      고를 때는 전부 0 인 빈 보고를 한 번 넣어 보는데, 뒤에 꽂힌 것부터
 #      보기 때문에 보통 마우스에는 엉뚱한 길이가 가지 않아야 한다.
@@ -1272,6 +1293,8 @@ say_lines(["READY 16"])
 check("인사를 받은 뒤에 멈추라고 보냄",
       say_lines.app.eng.pico.writes == [mt.pico_frames(0, 0, 0, 0)],
       str(say_lines.app.eng.pico.writes))
+check("연결할 때 어떤 펌웨어인지 물어봄",
+      "self.eng.pico.write(PICO_ASK)" in _src_app, "")
 
 _quiet = new_app()
 _quiet._pico_wait_t = time.perf_counter()

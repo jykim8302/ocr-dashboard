@@ -119,6 +119,9 @@ MOUSEEVENTF_XUP = 0x0100
 
 # 피코(USB 장치)로 보낼 때 쓰는 값
 PICO_SYNC = 0xAB
+# "어떤 펌웨어냐" 고 묻는 묶음. 보드는 언제 물어도 답한다.
+# 옛 펌웨어는 0xAB 가 아니라서 그냥 흘려보내고 아무 탈이 없다.
+PICO_ASK = bytes((0xAC, 0, 0, 0, 0))
 # 재생 중 모아 둔 이동을 피코로 내보내는 간격.
 # 피코는 USB 간격(대개 8밀리초) 마다 한 번씩만 보고할 수 있어서, 한 보고에
 # 담기는 양은 "그 사이에 도착한 양" 이 된다. 보내는 간격이 길면 보고마다
@@ -2095,6 +2098,10 @@ class App:
                 # 하면 인사할 틈이 없어져서 어떤 펌웨어인지 영영 모른다.
                 self._pico_greeted = False
                 self._pico_wait_t = time.perf_counter()
+                # 보드는 PC 가 말을 걸면 인사를 멈춘다. 그러면 프로그램을
+                # 다시 켰을 때 어떤 펌웨어인지 알 길이 없으므로, 여기서
+                # 직접 물어본다.
+                self.eng.pico.write(PICO_ASK)
             else:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
