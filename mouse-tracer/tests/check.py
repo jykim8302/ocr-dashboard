@@ -1233,6 +1233,34 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 
 
 print()
+print("=== 14-1. 포트를 못 열었을 때 이유 보여주기 ===")
+# 번호만 보여 주면 무엇을 해야 할지 알 수 없다. 자주 나오는 이유는
+# 할 일까지 같이 적어 준다.
+for _code, _want, _label in (
+        (5, "다른 프로그램", "이미 쓰는 중이면 그렇다고 알려줌"),
+        (2, "뺐다 꽂", "포트가 없으면 다시 꽂으라고 알려줌"),
+        (1234, "오류 1234", "모르는 번호는 번호라도 보여줌")):
+    mt.ctypes.set_last_error(_code)
+    _why = mt.open_fail_why()
+    check(_label, _want in _why, _why)
+check("아는 이유에도 번호를 같이 적음",
+      (mt.ctypes.set_last_error(5), "5" in mt.open_fail_why())[1], "")
+
+_fl = mt.PicoLink()
+mt._open_com_real = mt._open_com
+mt._open_com = lambda name, access=0: (mt.ctypes.set_last_error(5), None)[1]
+check("열기에 실패하면 이유를 적어 둠",
+      not _fl.open("COM9") and "다른 프로그램" in _fl.last_error,
+      _fl.last_error)
+mt._open_com = mt._open_com_real
+
+_src_fail = io.open(TARGET, encoding="utf-8").read()
+check("창도 그 이유를 같이 보여줌",
+      _src_fail.count('포트를 열지 못했습니다') == 2
+      and _src_fail.count('getattr(self.eng.pico, "last_error", "")') >= 2,
+      "")
+
+print()
 print("=== 14-2. 피코가 보낸 말 알아듣기 ===")
 
 class HushLink:

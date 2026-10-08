@@ -416,13 +416,33 @@ kernel32.SetCommState.restype = BOOL
 kernel32.GetCommState.restype = BOOL
 
 
+# 포트를 못 열었을 때 자주 나오는 이유. 번호만 보여 주면 무엇을 해야
+# 할지 알 수 없어서, 할 일까지 같이 적어 둔다.
+OPEN_FAIL_WHY = {
+    2: "그런 포트가 없습니다. 피코 USB 를 뺐다 꽂고 포트 찾기 를 다시 "
+       "누르세요",
+    5: "다른 프로그램이 이 포트를 쓰고 있습니다. MouseTracer 가 두 개 떠 "
+       "있지 않은지, 또는 Thonny 나 Mu 같은 편집기가 켜져 있지 않은지 "
+       "보세요",
+    32: "다른 프로그램이 이 포트를 붙잡고 있습니다",
+}
+
+
 def _open_com(name, access=GENERIC_WRITE):
     """COM 포트를 열어 핸들을 돌려준다. 실패하면 None."""
+    ctypes.set_last_error(0)
     h = kernel32.CreateFileW("\\\\.\\" + name, access, 0, None,
                              OPEN_EXISTING, 0, None)
     if not h or h == INVALID_HANDLE:
         return None
     return h
+
+
+def open_fail_why():
+    """방금 난 열기 실패를 사람이 알아볼 말로 바꾼다."""
+    code = ctypes.get_last_error()
+    note = OPEN_FAIL_WHY.get(code)
+    return "{} (오류 {})".format(note, code) if note else "오류 {}".format(code)
 
 
 def _com_number(name):
@@ -499,6 +519,7 @@ class PicoLink:
         # 드라이버가 있다.
         h = _open_com(name, GENERIC_READ | GENERIC_WRITE)
         if not h:
+            self.last_error = open_fail_why()
             return False
         self.setup_note = ""
         try:
@@ -2078,7 +2099,9 @@ class App:
             self.eng.use_pico = False
             self.v_pico.set(False)
             self.eng.log("{} 포트를 열지 못했습니다. 피코 사용을 "
-                         "껐습니다.".format(name))
+                         "껐습니다. {}".format(
+                             name, getattr(self.eng.pico, "last_error", "")
+                             or "원인 불명"))
 
     def toggle_pico(self):
         if self.v_pico.get():
@@ -2104,7 +2127,9 @@ class App:
                 self.eng.pico.write(PICO_ASK)
             else:
                 self.v_pico.set(False)
-                self.eng.log("포트를 열지 못했습니다: {}".format(name))
+                self.eng.log("포트를 열지 못했습니다: {}. {}".format(
+                    name, getattr(self.eng.pico, "last_error", "")
+                    or "원인 불명"))
         else:
             if self.eng.playing:
                 self.v_pico.set(True)
