@@ -119,6 +119,17 @@ MOUSEEVENTF_XUP = 0x0100
 
 # 피코(USB 장치)로 보낼 때 쓰는 값
 PICO_SYNC = 0xAB
+# 재생 중 모아 둔 이동을 피코로 내보내는 간격.
+# 피코는 USB 간격(대개 8밀리초) 마다 한 번씩만 보고할 수 있어서, 한 보고에
+# 담기는 양은 "그 사이에 도착한 양" 이 된다. 보내는 간격이 길면 보고마다
+# 담기는 양이 들쭉날쭉해져서 같은 속도로 그은 선도 울퉁불퉁해 보인다.
+# 간격을 반으로 줄이면 그 흔들림도 반으로 줄어든다.
+PICO_FLUSH_SEC = 0.002
+# 버튼을 누른 채 가만히 있는 동안 같은 상태를 다시 보내 주는 간격.
+# 안 보내면 보낼 것이 없어서 한 묶음도 안 나가는데, 그 사이 보드에서
+# 오류가 나 버튼이 풀리면 되돌릴 방법이 없다. 보드는 같은 상태를 받으면
+# 아무것도 하지 않으므로 다시 보내도 해롭지 않다.
+PICO_HOLD_SEC = 0.1
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
 # 시리얼 제어선. 이걸 켜지 않으면 상대 장치가 데이터를 받지 않는다.
@@ -469,8 +480,17 @@ class PicoLink:
         self.last_error = ""
         self.setup_note = ""
         self.timed_out = False
+        # 재생은 재생 갈래에서 쓰고, 피코가 보내는 말은 다른 갈래에서
+        # 읽는다. 보내기가 실패하면 통로를 닫고 다시 여는데, 그 사이에
+        # 다른 갈래가 이미 닫힌 손잡이로 읽으면 안 된다. 그래서 통로를
+        # 건드리는 동안에는 한 갈래만 들어오게 한다.
+        self._lock = threading.RLock()
 
     def open(self, name):
+        with self._lock:
+            return self._open(name)
+
+    def _open(self, name):
         self.close()
         # 읽기 권한까지 함께 연다. 쓰기만 열면 제어선을 못 바꾸는
         # 드라이버가 있다.
@@ -530,19 +550,24 @@ class PicoLink:
 
     def read(self, size=512):
         """피코가 보낸 말을 지금 와 있는 만큼만 가져온다."""
-        if not self.handle:
-            return b""
-        buf = ctypes.create_string_buffer(size)
-        got = DWORD(0)
-        try:
-            if not kernel32.ReadFile(self.handle, buf, size,
-                                     ctypes.byref(got), None):
+        with self._lock:
+            if not self.handle:
                 return b""
-        except Exception:
-            return b""
-        return buf.raw[:got.value]
+            buf = ctypes.create_string_buffer(size)
+            got = DWORD(0)
+            try:
+                if not kernel32.ReadFile(self.handle, buf, size,
+                                         ctypes.byref(got), None):
+                    return b""
+            except Exception:
+                return b""
+            return buf.raw[:got.value]
 
     def write(self, data):
+        with self._lock:
+            return self._write(data)
+
+    def _write(self, data):
         if not self.handle or not data:
             return False
         if self._raw_write(data):
@@ -564,6 +589,10 @@ class PicoLink:
         return False
 
     def close(self):
+        with self._lock:
+            self._close()
+
+    def _close(self):
         if self.handle:
             try:
                 kernel32.CloseHandle(self.handle)
@@ -799,6 +828,7 @@ class Engine:
         self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
+        self._pico_hold_t = 0.0
         self._pico_warned = set()   # 같은 안내를 두 번 하지 않으려고
         self._buf = (ctypes.c_ubyte * 65536)()
 
@@ -1206,9 +1236,14 @@ class Engine:
         wheel = int(self._pico_wheel / 120)
         self._pico_dx = self._pico_dy = 0
         self._pico_wheel -= wheel * 120
-        self._pico_flush_t = time.perf_counter()
-        if not (dx or dy or wheel or self.pico_btn != self._pico_sent_btn):
+        now = time.perf_counter()
+        self._pico_flush_t = now
+        hold = (self.pico_btn
+                and (now - self._pico_hold_t) >= PICO_HOLD_SEC)
+        if not (dx or dy or wheel
+                or self.pico_btn != self._pico_sent_btn or hold):
             return
+        self._pico_hold_t = now
         if self.pico.write(pico_frames(dx, dy, self.pico_btn, wheel)):
             self._pico_sent_btn = self.pico_btn
             return
@@ -1282,7 +1317,8 @@ class Engine:
                 self._warn_pico_once(
                     "xbutton", "피코 재생 중에는 마우스 옆 버튼이 빠집니다.")
 
-        if now_urgent or (time.perf_counter() - self._pico_flush_t) >= 0.004:
+        if (now_urgent
+                or (time.perf_counter() - self._pico_flush_t) >= PICO_FLUSH_SEC):
             self._pico_flush()
 
     def _emit(self, batch):
@@ -1528,6 +1564,7 @@ class Engine:
         self._pico_dx = self._pico_dy = self._pico_wheel = 0
         self._pico_sent_btn = 0
         self._pico_flush_t = 0.0
+        self._pico_hold_t = 0.0
         self._pico_warned = set()   # 같은 안내를 두 번 하지 않으려고
         self.playing = True
         self._play_thread = threading.Thread(
@@ -2051,6 +2088,8 @@ class App:
                 self.eng.log("피코 연결됨: {}. 이제 재생이 진짜 USB "
                              "마우스로 나갑니다.{}".format(
                                  name, " (" + note + ")" if note else ""))
+                threading.Thread(target=self._greet_pico_worker,
+                                 daemon=True).start()
             else:
                 self.v_pico.set(False)
                 self.eng.log("포트를 열지 못했습니다: {}".format(name))
@@ -2063,6 +2102,49 @@ class App:
             self.eng.use_pico = False
             self.eng.pico.close()
             self.eng.log("피코 연결을 끊었습니다.")
+
+    def _greet_pico_worker(self):
+        """피코가 보내는 인사를 읽어서 어느 펌웨어인지 알려 준다.
+
+        펌웨어는 첫 자료를 받기 전까지 1초마다 인사를 되풀이하므로,
+        잠깐 기다렸다 읽으면 반드시 한 줄은 들어온다.
+        """
+        try:
+            opened = self.eng.pico.name
+            text = ""
+            for _ in range(12):               # 최대 약 2.4초
+                time.sleep(0.2)
+                if self.eng.pico.name != opened:
+                    return      # 그 사이에 포트를 닫거나 바꿨다
+                got = self.eng.pico.read()
+                if got:
+                    text += got.decode("utf-8", "replace")
+                if "READY" in text or "FAIL" in text:
+                    break
+            if "MOUSE FAIL" in text:
+                # 보드가 알려 준 원인을 그대로 보여 준다. adafruit_hid 가
+                # 없을 때가 가장 흔하지만, 다른 원인일 수도 있다.
+                why = ""
+                for line in text.splitlines():
+                    if "MOUSE FAIL" in line:
+                        why = line.split("MOUSE FAIL", 1)[1].strip()
+                        break
+                self.eng.log("피코가 마우스를 못 만들었습니다{}. "
+                             "adafruit_hid 라이브러리를 lib 폴더에 "
+                             "넣었는지 먼저 확인하세요.".format(
+                                 ": " + why[:120] if why else ""))
+            elif "READY 16" in text:
+                self.eng.log("피코 펌웨어: 큰 걸음 방식. 빠르게 움직여도 "
+                             "밀리지 않습니다.")
+            elif "READY 8" in text:
+                self.eng.log("피코 펌웨어가 옛 방식입니다. 빠른 구간에서 "
+                             "움직임이 밀리고 클릭이 길어집니다. "
+                             "pico 폴더의 boot.py 와 code.py 를 피코에 "
+                             "다시 복사하세요.")
+            elif text.strip():
+                self.eng.log("피코가 보낸 말: {}".format(text.strip()[:200]))
+        except Exception:
+            pass          # 인사를 못 읽는 것 자체는 문제가 아니다
 
     def test_pico(self):
         if not self.eng.pico.handle:

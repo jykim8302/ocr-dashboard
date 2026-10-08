@@ -140,9 +140,14 @@ class _Stop(BaseException):
     """
 
 
-def run_firmware(frame_bytes):
-    """pico/code.py 를 그대로 불러들여 프레임을 먹이고 무엇을 냈는지 본다."""
-    moves, buttons, said = [], [], []
+def run_firmware(frame_bytes, fast=False, fail_at=None):
+    """pico/code.py 를 그대로 불러들여 프레임을 먹이고 무엇을 냈는지 본다.
+
+    fast=True 면 boot.py 가 만드는 "큰 걸음 마우스"(한 보고에 32767 까지,
+    6바이트 보고) 가 꽂혀 있는 상황을 흉내 낸다. fast=False 면 그 장치가
+    없어서 보통 마우스(한 보고에 127 까지) 로 되돌아가는 상황이다.
+    """
+    moves, buttons, said, reports = [], [], [], []
 
     class FakeMouse:
         LEFT_BUTTON, RIGHT_BUTTON, MIDDLE_BUTTON = 1, 2, 4
@@ -159,24 +164,34 @@ def run_firmware(frame_bytes):
         멈추면 아직 못 내보낸 이동량이 남는다. 실제 장치에서는 루프가
         계속 도니 그 부분까지 보려면 빈 상태로 몇 바퀴 더 줘야 한다.
         """
-        IDLE_ROUNDS = 50
+        IDLE_ROUNDS = 60
 
         def __init__(self, data):
-            self.data = bytearray(data)
+            # 묶음 하나를 통째로 주면 한 바퀴에 다 읽어 간다.
+            # 여러 토막으로 나눠 주면 한 바퀴에 한 토막씩만 읽어 가서,
+            # 실제 장치처럼 "자료가 시간에 걸쳐 들어오는" 상황이 된다.
+            if isinstance(data, (bytes, bytearray)):
+                self.chunks = [bytearray(data)] if data else []
+            else:
+                self.chunks = [bytearray(c) for c in data if c]
             self.idle = 0
 
         @property
         def in_waiting(self):
-            if self.data:
+            if self.chunks:
                 self.idle = 0
-                return len(self.data)
+                return len(self.chunks[0])
             self.idle += 1
             if self.idle > self.IDLE_ROUNDS:
                 raise _Stop()
             return 0
 
         def read(self, n):
-            out = bytes(self.data[:n]); del self.data[:n]; return out
+            cur = self.chunks[0]
+            out = bytes(cur[:n]); del cur[:n]
+            if not cur:
+                self.chunks.pop(0)
+            return out
 
         def write(self, payload):
             said.append(bytes(payload))
@@ -192,8 +207,34 @@ def run_firmware(frame_bytes):
     class FakeDigitalInOut:
         def __init__(self, pin): self.direction = None; self.value = False
 
+    class FakeStdMouseDev:
+        """보통 마우스. 6바이트 보고는 길이가 안 맞아서 거절한다."""
+        usage_page, usage = 0x01, 0x02
+        def send_report(self, report, report_id=None):
+            if len(report) != 4:
+                raise ValueError("report length must be 4")
+            reports.append(("std", bytes(report)))
+
+    class FakeFastMouseDev:
+        """큰 걸음 마우스. 6바이트 보고만 받는다.
+
+        fail_at 을 주면 그 번째 보고에서 한 번 실패한다. 실제 장치에서
+        USB 가 잠깐 막히는 상황을 흉내 내서, 그 뒤에도 버튼이 눌린 채로
+        남지 않는지 보려는 것이다.
+        """
+        usage_page, usage = 0x01, 0x02
+        def send_report(self, report, report_id=None):
+            if len(report) != 6:
+                raise ValueError("report length must be 6")
+            if fail_at is not None and len(reports) == fail_at:
+                reports.append(("실패", bytes(report)))
+                raise OSError("USB busy")
+            reports.append(("fast", bytes(report)))
+
     usb_cdc = types.ModuleType("usb_cdc"); usb_cdc.data = FakePort(frame_bytes)
-    usb_hid = types.ModuleType("usb_hid"); usb_hid.devices = []
+    usb_hid = types.ModuleType("usb_hid")
+    # boot.py 와 같은 순서로 꽂아 둔다: 보통 마우스가 먼저, 큰 걸음이 뒤
+    usb_hid.devices = ([FakeStdMouseDev(), FakeFastMouseDev()] if fast else [])
     pkg = types.ModuleType("adafruit_hid")
     mouse_mod = types.ModuleType("adafruit_hid.mouse")
     mouse_mod.Mouse = FakeMouse
@@ -223,6 +264,41 @@ def run_firmware(frame_bytes):
             else:
                 sys.modules[n] = old
     run_firmware.said = said
+    run_firmware.used_fast = False
+    run_firmware.leaked = False
+    if fast:
+        # 6바이트 보고를 (가로, 세로, 휠) 과 버튼 변화로 되돌려서,
+        # 보통 마우스 쪽과 똑같은 모양으로 견주어 볼 수 있게 한다.
+        #
+        # 여기서는 멈추지 않는다. 멈추면 뒤에 있는 검사 100여 개가
+        # 아예 돌지 않아서, 무엇이 깨졌는지 한눈에 볼 수 없게 된다.
+        # 그래서 표시만 남기고 검사 쪽에서 판단하게 한다.
+        probe = None
+        for _idx in range(len(reports)):
+            if reports[_idx] == ("fast", b"\x00" * 6):
+                probe = _idx            # 마우스를 고를 때 넣어 본 빈 보고
+                break
+        run_firmware.used_fast = probe is not None
+        prev = 0
+        for kind, rep in reports[(len(reports) if probe is None
+                                  else probe + 1):]:
+            if kind == "실패":
+                continue            # 호스트까지 가지 않은 보고
+            if kind != "fast":
+                run_firmware.leaked = True
+                continue            # 보통 마우스로 새어 나간 보고
+            btn = rep[0]
+            x = int.from_bytes(rep[1:3], "little", signed=True)
+            y = int.from_bytes(rep[3:5], "little", signed=True)
+            w = rep[5] - 256 if rep[5] > 127 else rep[5]
+            moves.append((x, y, w))
+            for index, bit in enumerate((0x01, 0x02, 0x04)):
+                if (btn & bit) and not (prev & bit):
+                    buttons.append(("press", 1 << index, len(moves)))
+                elif (prev & bit) and not (btn & bit):
+                    buttons.append(("release", 1 << index, len(moves)))
+            prev = btn
+    run_firmware.reports = reports
     return moves, buttons
 
 
@@ -257,6 +333,129 @@ check("누른 뒤 놓기까지", [b[0] for b in buttons] == ["press", "release"]
 # 8-4) 앞에 쓰레기 바이트가 섞여도 다시 맞춰 읽는다
 moves, buttons = run_firmware(b"\x00\x11\x22" + mt.pico_frames(7, -5, 0, 0))
 check("깨진 앞부분 건너뛰고 복구", moves and moves[0] == (7, -5, 0), str(moves[:1]))
+
+# 8-4-2) PC 가 버튼 자리에 보내는 값은 0~7 뿐이어야 한다.
+#        펌웨어가 그 범위로 묶음 시작을 확인하기 때문에, 여기가 넓어지면
+#        깨진 바이트를 걸러내는 장치가 조용히 무력해진다.
+_btn_bytes = set()
+for _b in range(0, 8):
+    for _frame_start in range(0, len(mt.pico_frames(300, -300, _b, 200)), 5):
+        _f = mt.pico_frames(300, -300, _b, 200)
+        _btn_bytes.add(_f[_frame_start + 3])
+check("PC 가 보내는 버튼 값은 0~7 뿐",
+      _btn_bytes == set(range(8)), str(sorted(_btn_bytes)))
+
+# 8-5) boot.py 가 만든 "큰 걸음 마우스" 가 있으면 그걸 골라 쓴다.
+#      고를 때는 전부 0 인 빈 보고를 한 번 넣어 보는데, 뒤에 꽂힌 것부터
+#      보기 때문에 보통 마우스에는 엉뚱한 길이가 가지 않아야 한다.
+flick = mt.pico_frames(2000, -1500, 0, 0)
+moves, buttons = run_firmware(flick, fast=True)
+check("큰 걸음 마우스를 골라 씀",
+      run_firmware.used_fast and not run_firmware.leaked,
+      str([k for k, _r in run_firmware.reports[:3]]))
+check("큰 걸음 쪽 총 이동량 보존",
+      (sum(m[0] for m in moves), sum(m[1] for m in moves)) == (2000, -1500),
+      str((sum(m[0] for m in moves), sum(m[1] for m in moves))))
+check("빠른 이동도 보고 한 번으로 끝남", len(moves) == 1, "%d번" % len(moves))
+
+# 8-6) 큰 걸음 마우스가 없으면 보통 마우스로 되돌아간다.
+#      그 쪽은 한 보고에 127 까지라서 같은 이동에 보고를 훨씬 많이 쓴다.
+slow_moves, _slow_buttons = run_firmware(flick, fast=False)
+check("큰 걸음이 없으면 보통 마우스로 되돌아감",
+      slow_moves and sum(m[0] for m in slow_moves) == 2000,
+      "%d번 보고 / 총 %d" % (len(slow_moves), sum(m[0] for m in slow_moves)))
+check("보통 마우스는 같은 이동에 보고를 훨씬 많이 씀",
+      len(slow_moves) >= 16 and len(moves) * 8 < len(slow_moves),
+      "큰 걸음 %d번 vs 보통 %d번" % (len(moves), len(slow_moves)))
+
+# 8-7) 버튼이 바뀌는 보고에 밀린 이동을 같이 실어서 보고를 한 번 아낀다.
+#      (보고 한 번이 USB 간격 한 번이라 그만큼 클릭이 빨리 시작된다)
+data = (mt.pico_frames(30, 0, 0, 0) + mt.pico_frames(20, 0, 0, 0)
+        + mt.pico_frames(0, 0, 0x01, 0) + mt.pico_frames(0, 0, 0, 0))
+moves, buttons = run_firmware(data, fast=True)
+press_at = [b[2] for b in buttons if b[0] == "press"][0]
+check("누르는 보고에 밀린 이동을 같이 실음",
+      moves[press_at - 1] == (50, 0, 0), str(moves[:2]))
+
+# 8-8) 클릭이 늘어나지 않는지. 자료가 시간에 걸쳐 들어오는 상황을 흉내 낸다.
+#      한 바퀴(USB 간격 한 번) 에 들어오는 이동량이 127 을 넘으면 보통
+#      마우스는 보낼 양이 밀리고, 밀린 양을 비우는 데 보고를 더 쓴다.
+#      그래서 누름과 놓음 사이가 녹화보다 길어진다. 실제로 "움직임이
+#      부자연스럽고 클릭이 더 오래 눌린다" 고 느껴진 원인이다.
+HOLD_ROUNDS = 10
+
+
+def timed_stream(per_flush, rounds=40, hold=(15, 25), flush_per_round=4):
+    """한 바퀴마다 flush_per_round 번씩 보낸 것처럼 토막을 만든다."""
+    out = []
+    for index in range(rounds):
+        btn = 0x01 if hold[0] <= index < hold[1] else 0
+        out.append(b"".join(mt.pico_frames(per_flush, 0, btn, 0)
+                            for _ in range(flush_per_round)))
+    return out
+
+
+def hold_length(per_flush, fast):
+    """눌려 있던 동안 보고를 몇 번 썼는지 센다 (= 눌린 시간)."""
+    _m, btns = run_firmware(timed_stream(per_flush), fast=fast)
+    kinds = [b[0] for b in btns]
+    if kinds != ["press", "release"]:
+        return None, len(_m), kinds
+    pressed = [b[2] for b in btns if b[0] == "press"][0]
+    released = [b[2] for b in btns if b[0] == "release"][0]
+    return released - pressed, len(_m), kinds
+
+
+for _per in (40, 60, 100):
+    fast_hold, fast_total, fast_kinds = hold_length(_per, True)
+    check("큰 걸음: 한 바퀴 %d 여도 누름/놓음 한 번씩" % (_per * 4),
+          fast_kinds == ["press", "release"], str(fast_kinds))
+    check("큰 걸음: 한 바퀴 %d 여도 클릭이 안 늘어남" % (_per * 4),
+          fast_hold == HOLD_ROUNDS + 1,
+          "녹화 %d바퀴 -> %s바퀴" % (HOLD_ROUNDS, fast_hold))
+    check("큰 걸음: 한 바퀴 %d 여도 전체 길이가 안 늘어남" % (_per * 4),
+          fast_total <= 45, "보고 %d번" % fast_total)
+
+# 8-9) 위 검사가 진짜로 늘어난 것을 잡아내는지 확인한다.
+#      보통 마우스 경로는 같은 상황에서 분명히 늘어나야 한다.
+slow_hold, slow_total, _k = hold_length(100, False)
+check("보통 마우스 경로에서는 클릭이 늘어남 (검사가 작동하는 증거)",
+      slow_hold is not None and slow_hold > HOLD_ROUNDS + 5,
+      "녹화 %d바퀴 -> %s바퀴" % (HOLD_ROUNDS, slow_hold))
+check("보통 마우스 경로에서는 전체도 늘어남 (검사가 작동하는 증거)",
+      slow_total > 45 + 20, "보고 %d번" % slow_total)
+
+# 8-10) 깨진 바이트를 버튼으로 오인해서 엉뚱한 버튼을 누르면 안 된다.
+#       PC 는 버튼 자리에 0~7 만 보낸다.
+junk_moves, junk_buttons = run_firmware(
+    b"\xab\x00\x00\xff\x00" * 50 + mt.pico_frames(9, 0, 0, 0), fast=True)
+check("깨진 바이트로 엉뚱한 버튼을 누르지 않음", junk_buttons == [],
+      str(junk_buttons))
+check("깨진 바이트 뒤의 정상 이동은 살림",
+      sum(m[0] for m in junk_moves) == 9,
+      "총 %d" % sum(m[0] for m in junk_moves))
+
+# 8-11) 보내기가 한 번 실패해도 버튼이 눌린 채로 남지 않는다.
+#       눌린 채로 남으면 PC 가 잠긴 것처럼 된다.
+err_moves, err_buttons = run_firmware(
+    mt.pico_frames(0, 0, 0x01, 0) + mt.pico_frames(5, 0, 0x01, 0),
+    fast=True, fail_at=1)
+check("보내기가 실패하면 알림을 보냄",
+      any(b"ERR" in line for line in run_firmware.said),
+      str(run_firmware.said[:3]))
+# 실제로 호스트까지 간 보고만 본다. 하나도 없으면 놓은 적이 없는 것이므로
+# 비어 있다는 이유로 통과하면 안 된다 (all([]) 은 참이다).
+_sent = [rep for kind, rep in run_firmware.reports if kind == "fast"]
+check("실패 뒤에 버튼을 반드시 놓아 둠",
+      len(_sent) >= 2 and (_sent[-1][0] & 0x07) == 0,
+      "호스트로 간 보고 %d개 / 마지막 %s"
+      % (len(_sent), _sent[-1].hex() if _sent else "없음"))
+
+# 8-12) 켜진 직후 보고가 한 번 막혀도 큰 걸음 마우스를 포기하지 않는다
+_m12, _b12 = run_firmware(mt.pico_frames(2000, 0, 0, 0), fast=True, fail_at=0)
+check("탐색이 한 번 막혀도 큰 걸음으로 붙음",
+      run_firmware.used_fast and len(_m12) == 1 and _m12[0] == (2000, 0, 0),
+      "큰걸음=%s 보고=%s" % (run_firmware.used_fast, _m12[:3]))
 
 print()
 print("=== 6. 단축키 ===")
@@ -940,6 +1139,37 @@ check("놓기가 실패하면 한 번 더 시도",
 check("놓기까지 실패하면 되돌릴 표시를 남김",
       erf._pico_sent_btn != 0, str(erf._pico_sent_btn))
 
+# 버튼을 누른 채 가만히 있으면 보낼 것이 없어서 한 묶음도 안 나간다.
+# 그 사이 보드에서 오류가 나 버튼이 풀리면 되돌릴 방법이 없으므로,
+# 누르고 있는 동안에는 같은 상태를 가끔 다시 보내 줘야 한다.
+class CountLink:
+    def __init__(s): s.writes = []
+    def write(s, dd): s.writes.append(bytes(dd)); return True
+    def close(s): pass
+
+eh = mt.Engine(); eh.pico = CountLink(); eh.use_pico = True
+eh.pico_btn = 0x01
+eh._pico_flush()                       # 누름 전달
+_after_press = len(eh.pico.writes)
+eh._pico_flush()                       # 바로 또 불러도 다시 안 보냄
+check("누른 직후에는 같은 상태를 다시 안 보냄",
+      len(eh.pico.writes) == _after_press, str(eh.pico.writes))
+eh._pico_hold_t -= mt.PICO_HOLD_SEC + 0.01   # 유지 간격이 지난 것으로
+eh._pico_flush()
+check("누른 채 가만히 있으면 상태를 다시 보냄",
+      len(eh.pico.writes) == _after_press + 1
+      and eh.pico.writes[-1][3] == 0x01, str(eh.pico.writes))
+
+# 버튼을 안 누르고 가만히 있으면 보낼 것이 없다. 괜한 묶음을 보내면
+# 안 된다 (USB 간격을 공짜로 잡아먹는다).
+eh.pico_btn = 0
+eh._pico_sent_btn = 0
+eh._pico_hold_t -= mt.PICO_HOLD_SEC + 0.01
+_before = len(eh.pico.writes)
+eh._pico_flush()
+check("안 누르고 있으면 괜한 묶음을 안 보냄",
+      len(eh.pico.writes) == _before, str(eh.pico.writes[-1:]))
+
 check("NaN 이 들어와도 거부",
       mt.clean_events([["m", float("nan"), 1, 1, 0, 0, 0]]) is None, "")
 check("무한대도 거부",
@@ -982,6 +1212,48 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 
 
 print()
+print("=== 14-2. 피코 펌웨어 종류 알려주기 ===")
+
+class FakePico:
+    """인사 한 줄을 돌려주는 가짜 피코."""
+    def __init__(s, text, name="COM9"):
+        s.text, s.name, s.handle = text.encode("utf-8"), name, 1
+    def read(s, size=512):
+        out, s.text = s.text, b""
+        return out
+
+ga = mt.App.__new__(mt.App)
+for _text, _want, _label in (
+        ("READY 16\n", "큰 걸음", "큰 걸음 펌웨어를 알아봄"),
+        ("READY 8\n", "다시 복사", "옛 펌웨어면 다시 복사하라고 알려줌"),
+        ("MOUSE FAIL OSError('보드가 말한 원인')\n", "보드가 말한 원인", "보드가 말한 원인을 그대로 보여줌"),
+        ("ERR something\n", "ERR something", "모르는 말은 그대로 보여줌")):
+    ga.eng = mt.Engine()
+    ga.eng.pico = FakePico(_text)
+    ga._greet_pico_worker()
+    _lines = []
+    while not ga.eng.log_q.empty():
+        _lines.append(ga.eng.log_q.get())
+    _log = " ".join(_lines)
+    check(_label, _want in _log, _log[-90:])
+
+# 기다리는 동안 포트를 닫거나 바꾸면 더 읽지 않는다
+# (이미 닫힌 손잡이를 다시 쓰지 않게 하려는 것)
+class SwapPico(FakePico):
+    def read(s, size=512):
+        s.name = "COM11"          # 기다리는 사이에 포트가 바뀌었다
+        return b""
+
+ga.eng = mt.Engine()
+ga.eng.pico = SwapPico("", name="COM9")
+ga._greet_pico_worker()
+_lines = []
+while not ga.eng.log_q.empty():
+    _lines.append(ga.eng.log_q.get())
+check("포트가 바뀌면 인사를 읽지 않음",
+      not any("펌웨어" in m for m in _lines), str(_lines))
+
+print()
 print("=== 15. 실행 파일이 지금 코드를 품고 있는지 ===")
 import base64 as _b64, hashlib as _hashlib
 bat_path = os.path.join(ROOT, "MouseTracer.bat")
@@ -1001,6 +1273,55 @@ except Exception as _ex:
     same, detail = False, repr(_ex)
 check("MouseTracer.bat 안의 프로그램이 원본과 같음", same, detail)
 
+
+print()
+print("=== 15-2. boot.py 의 HID 설명서가 올바른지 ===")
+# 설명서가 조금만 틀어져도 Windows 가 장치를 거절해서 마우스가 아예
+# 안 생긴다. 그래서 설명서를 직접 훑어 보고를 몇 바이트로 만드는지 센다.
+import re as _re
+_boot = io.open(os.path.join(ROOT, "pico", "boot.py"), encoding="utf-8").read()
+try:
+    _body = _boot.split("FAST_MOUSE_DESCRIPTOR = bytes((", 1)[1].split("))", 1)[0]
+    _desc = [int(x, 16) for x in _re.findall(r"0x([0-9A-Fa-f]{2})", _body)]
+    _i = _depth = _bits = 0
+    _rid = _size = _count = None
+    while _i < len(_desc):
+        _b = _desc[_i]; _i += 1
+        _typ, _tag, _n = (_b >> 2) & 3, _b >> 4, _b & 3
+        _n = 4 if _n == 3 else _n
+        _val = 0
+        for _k in range(_n):
+            _val |= _desc[_i + _k] << (8 * _k)
+        _i += _n
+        if _typ == 1 and _tag == 0x8: _rid = _val
+        if _typ == 1 and _tag == 0x7: _size = _val
+        if _typ == 1 and _tag == 0x9: _count = _val
+        if _typ == 0 and _tag == 0xA: _depth += 1
+        if _typ == 0 and _tag == 0xC: _depth -= 1
+        if _typ == 0 and _tag == 0x8: _bits += _size * _count
+    _ok_len = (_i == len(_desc))
+except Exception as _ex:
+    # _i 까지 반드시 되돌려 둔다. 안 그러면 아래 설명에 앞 검사에서
+    # 쓰던 값이 섞여 나오거나, 아예 이름이 없어 검사가 중간에 멈춘다.
+    _desc, _ok_len, _depth, _bits, _rid, _i = [], False, -1, -1, None, -1
+    print("   (설명서를 읽지 못했습니다: %r)" % (_ex,))
+
+check("설명서가 중간에 끊기지 않음", _ok_len, "%d바이트 중 %d" % (len(_desc), _i))
+check("묶음 열고 닫기가 맞음", _depth == 0, "깊이 %d" % _depth)
+check("보고가 바이트 단위로 딱 맞음", _bits > 0 and _bits % 8 == 0,
+      "%d비트" % _bits)
+check("보고 크기가 6바이트", _bits // 8 == 6, "%d바이트" % (_bits // 8))
+check("보고 번호가 붙어 있음 (기본 마우스와 같이 쓰려면 필요)",
+      _rid not in (None, 0), str(_rid))
+# 설명서가 16비트 좌표를 쓰는지 (이게 빠지면 클릭이 다시 길어진다)
+check("좌표가 16비트", bytes(_desc).find(bytes((0x75, 0x10))) >= 0, "")
+check("좌표 범위가 -32767~32767",
+      bytes(_desc).find(bytes((0x16, 0x01, 0x80))) >= 0
+      and bytes(_desc).find(bytes((0x26, 0xFF, 0x7F))) >= 0, "")
+check("기본 마우스를 같이 남겨 둠 (옛 code.py 도 동작하게)",
+      "usb_hid.Device.MOUSE, fast_mouse" in _boot, "")
+check("설명서를 거절당하면 기본 마우스로 되돌림",
+      "usb_hid.enable((usb_hid.Device.MOUSE,))" in _boot, "")
 
 print()
 print("=== 16. 펌웨어가 CircuitPython 에서 못 쓰는 문법을 안 쓰는지 ===")
