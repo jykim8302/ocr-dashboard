@@ -8,7 +8,7 @@ Windows 전용 프로그램이라 리눅스에서는 실행할 수 없다. 그�
 
 한 항목이라도 실패하면 종료 코드 1 을 돌려준다.
 """
-import ctypes, io, sys, types, os, importlib.util, tempfile, random, time
+import ctypes, io, re, sys, types, os, importlib.util, tempfile, random, time
 
 class FakeFunc:
     def __init__(s, n): s.n = n; s.argtypes = None; s.restype = None
@@ -1235,8 +1235,16 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 print()
 print("=== 13-9. 글로 적어서 만드는 매크로 ===")
 
-def mac(text, per_cm=mt.PX_PER_CM):
-    return mt.parse_macro(text, per_cm)
+def mac(text, per_cm=mt.PX_PER_CM, gap=0.0):
+    return mt.parse_macro(text, per_cm, gap)
+
+
+def biggest_hole(events):
+    """움직인 조각들 사이의 가장 긴 빈틈 (초). 멈췄는지 보는 자다."""
+    times = [e[1] for e in events if e[2] or e[3]]
+    if len(times) < 2:
+        return 0.0
+    return max(b - a for a, b in zip(times, times[1:]))
 
 # 길이가 정확히 나오는가 (1cm = 37.8픽셀이면 3cm = 113픽셀)
 _ev, _er = mac("오른쪽 3cm")
@@ -1344,6 +1352,46 @@ for _bad in ("오른쪽 nan", "오른쪽 inf", "오른쪽 -inf"):
     check("'%s' 는 거부" % _bad, _ev == [] and len(_er) == 1, str(_er))
 _ev, _er = mac("휠 99999")
 check("휠을 너무 많이 돌리면 거부", _ev == [] and len(_er) == 1, str(_er))
+
+# 이어 붙은 이동 사이에서는 멈추지 않아야 한다. 이동마다 섰다가
+# 다시 출발하면 그 멈칫함이 "간격" 으로 느껴진다 (실제로 그랬다).
+_ev, _er = mac("오른쪽 200\n오른쪽 200")
+check("이어진 이동 사이에 멈추지 않음", biggest_hole(_ev) <= 2 * mt.MACRO_STEP,
+      "가장 긴 빈틈 %.3f초" % biggest_hole(_ev))
+_mid = _ev[len(_ev) // 2]
+check("경계에서도 속도를 그대로 이어감",
+      abs(_mid[2]) >= 3 and abs(_ev[0][2]) < abs(_mid[2]),
+      "처음=%d 가운데=%d" % (_ev[0][2], _mid[2]))
+_ev, _er = mac("오른쪽 200\n아래 200")
+check("방향이 꺾여도 안 멈춤", biggest_hole(_ev) <= 2 * mt.MACRO_STEP,
+      "%.3f초" % biggest_hole(_ev))
+# 하나뿐인 이동은 섰다가 서야 한다 (앞뒤로 이어질 것이 없다)
+_ev, _er = mac("오른쪽 200")
+check("이동이 하나뿐이면 천천히 서고 천천히 멈춤",
+      abs(_ev[0][2]) < abs(_ev[len(_ev) // 2][2]) > abs(_ev[-1][2]),
+      "처음=%d 가운데=%d 끝=%d"
+      % (_ev[0][2], _ev[len(_ev) // 2][2], _ev[-1][2]))
+# 사이에 클릭이 끼면 멈추는 것이 맞다
+_ev, _er = mac("오른쪽 200\n클릭\n오른쪽 200")
+check("사이에 클릭이 끼면 멈춤", biggest_hole(_ev) > 0.05,
+      "%.3f초" % biggest_hole(_ev))
+
+# 쉬는 시간은 설정할 수 있고, 기본은 0 이다
+import inspect as _inspect
+check("쉬는 시간 기본값이 0",
+      _inspect.signature(mt.parse_macro).parameters["gap"].default == 0.0, "")
+_ev0, _e0 = mac("오른쪽 200\n오른쪽 200")
+_ev3, _e3 = mac("오른쪽 200\n오른쪽 200", gap=0.3)
+check("쉬는 시간을 주면 그만큼 길어짐",
+      abs((_ev3[-1][1] - _ev0[-1][1]) - 0.3) < 0.01,
+      "%.3f -> %.3f" % (_ev0[-1][1], _ev3[-1][1]))
+check("쉬는 시간을 주면 그 사이는 비어 있음",
+      abs(biggest_hole(_ev3) - 0.3) < 0.03, "%.3f초" % biggest_hole(_ev3))
+check("쉬는 시간은 맨 끝에는 안 붙음",
+      abs(_ev3[-1][1] - (_ev0[-1][1] + 0.3)) < 0.01, str(_ev3[-1][1]))
+_ev1, _e1 = mac("오른쪽 200", gap=0.3)
+check("동작이 하나면 쉬는 시간이 안 붙음",
+      abs(_ev1[-1][1] - mac("오른쪽 200")[0][-1][1]) < 0.001, str(_ev1[-1][1]))
 
 # 만든 기록은 녹화한 것과 같은 모양이어야 한다 (재생/저장/피코 그대로)
 _ev, _er = mac("오른쪽 3cm\n클릭\n0.5초\n누르기\n아래 2cm\n떼기\n휠 -3")
@@ -1526,6 +1574,12 @@ class FakeW:
     def rowconfigure(s, *a, **k): pass
     def yview(s, *a): pass
     def see(s, *a): pass
+    def set(s, *a): pass
+
+    def __contains__(s, other):
+        # 위젯을 글자처럼 뒤지면 __getitem__ 으로 끝없이 돈다.
+        # 조용히 멈추느니 바로 터지는 편이 낫다.
+        raise TypeError("위젯 안에서 글자를 찾으려 했습니다: %r" % (other,))
     def after(s, ms, fn=None, *a): pass
 
 
@@ -1545,11 +1599,22 @@ class FakeEntry(FakeW):
     def get(s): return s.buf
 
 
+class FakeVar:
+    def __init__(s, *a, **k): s.v = k.get("value", "")
+    def set(s, x): s.v = x
+    def get(s): return s.v
+    def trace_add(s, *a, **k): pass
+
+
 for _m in (sys.modules["tkinter"], sys.modules["tkinter.ttk"]):
     for _n in ("Frame", "Label", "Button", "Scrollbar", "Toplevel", "Tk",
-               "Checkbutton", "Combobox", "LabelFrame", "Labelframe"):
+               "Checkbutton", "Combobox", "LabelFrame", "Labelframe",
+               "Style", "Menu", "Spinbox", "Radiobutton", "PanedWindow"):
         setattr(_m, _n, FakeW)
     _m.Text, _m.Entry = FakeText, FakeEntry
+    for _n in ("StringVar", "BooleanVar", "IntVar", "DoubleVar"):
+        setattr(_m, _n, FakeVar)
+sys.modules["tkinter"].END = "end"
 
 
 def find_button(node, label):
@@ -1563,15 +1628,36 @@ def find_button(node, label):
     return None
 
 
+# App.__init__ 은 갈래와 메시지 고리까지 끌고 들어와서 검사에서 통째로
+# 돌릴 수 없다. 그래서 매크로 창에 필요한 값만 담은 껍데기를 쓴다.
+# 대신 __init__ 이 넣어 주는 값과 어긋나면 바로 드러나게 아래에서 센다.
+MACRO_APP_FIELDS = {
+    "_macro_win": None,
+    "_macro_text": "",
+    "_macro_px_per_cm": mt.PX_PER_CM,
+    "_macro_gap": 0.0,
+}
+
+
 def new_macro_app(played):
     app = mt.App.__new__(mt.App)
     app.eng = mt.Engine()
     app.root = FakeW()
-    app._macro_win = None
-    app._macro_text = ""
-    app._macro_px_per_cm = mt.PX_PER_CM
+    for _k, _v in MACRO_APP_FIELDS.items():
+        setattr(app, _k, _v)
     app.toggle_play = lambda: played.append("재생")
     return app
+
+
+# __init__ 이 넣는 _macro... 값과 껍데기가 같은지 본다. 하나라도 빠지면
+# 창을 열다 죽는데, 껍데기가 어긋난 줄 모르고 지나가기 쉽다.
+_init_src = _mac_src[_mac_src.index("    def __init__(self, root, engine)"):]
+_init_src = _init_src[:_init_src.index("\n    def ")]
+_init_fields = set(re.findall(r"self\.(_macro_\w+)\s*=", _init_src))
+check("매크로 껍데기가 진짜 창과 같은 값을 가짐",
+      _init_fields == set(MACRO_APP_FIELDS),
+      "진짜=%s 껍데기=%s" % (sorted(_init_fields),
+                            sorted(MACRO_APP_FIELDS)))
 
 
 _played = []
@@ -1643,6 +1729,14 @@ check("빈 내용이면 만들 것이 없다고 알려줌",
 # 창에 들어 있던 예시가 그대로 만들어지는지 (예시가 틀리면 안 된다)
 _ev_sample, _er_sample = mt.parse_macro(mt.App.MACRO_SAMPLE)
 check("창에 든 예시에 틀린 줄이 없음", _er_sample == [], str(_er_sample))
+# 여기서 _win 은 가짜 창(위젯)이다. 소스를 볼 때는 _macro_code 를 쓴다.
+_macro_code = _mac_src[_mac_src.index("def open_macro"):
+                       _mac_src.index("def _hush_pico")]
+check("창에 동작 사이 쉬기 칸이 있음", "동작 사이 쉬기" in _macro_code, "")
+check("쉬기 칸 기본값이 0", "self._macro_gap = 0.0" in _mac_src, "")
+check("쉬기가 엉터리면 만들지 않음",
+      "0.0 <= pause <= 60.0" in _macro_code
+      and "parse_macro(text, per_cm, pause)" in _macro_code, "")
 
 print()
 # 옛 파일이 그대로 도는지 한눈에 가릴 수 있어야 한다

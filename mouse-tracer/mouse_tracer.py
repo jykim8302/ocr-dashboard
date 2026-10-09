@@ -755,26 +755,47 @@ def macro_seconds(word):
     return None
 
 
-def parse_macro(text, px_per_cm=PX_PER_CM):
+def macro_ease(part, slow_start, slow_end):
+    """0~1 로 흐른 시간을 0~1 로 간 거리로 바꾼다.
+
+    멈춰 있다 출발할 때와 멈추려 할 때만 느리게 한다. 이어 붙은 이동
+    사이에서는 속도를 그대로 이어받아, 중간에 멈칫하지 않게 한다.
+    네 가지 모두 평균 속도는 같고, 이어지는 자리의 속도도 서로 맞는다.
+    """
+    if slow_start and slow_end:
+        return part * part * (3.0 - 2.0 * part)     # 섰다가 서기
+    if slow_start:
+        return part * part * (2.0 - part)           # 섰다가 달리기
+    if slow_end:
+        return part * (1.0 + part - part * part)    # 달리다가 서기
+    return part                                      # 쭉 같은 속도
+
+
+def parse_macro(text, px_per_cm=PX_PER_CM, gap=0.0):
     """글로 적은 매크로를 재생할 수 있는 기록으로 바꾼다.
+
+    gap 은 동작과 동작 사이에 넣을 쉬는 시간이다. 기본은 0 이라 이동이
+    이어 붙고, 그 사이에서는 멈추지 않는다.
 
     (기록, 잘못된 줄 안내 목록) 을 돌려준다. 잘못된 줄이 있어도 나머지는
     그대로 만든다. 한 줄 틀렸다고 전부 버리면 고치기가 어렵다.
     """
-    events = []
-    errors = []
-    now = [0.0]                 # 여기까지 흐른 시간
+    # 먼저 줄을 할 일 목록으로 바꾼다. 이렇게 해 두어야 "이동 다음에
+    # 또 이동" 인지를 미리 알 수 있고, 그래야 그 사이에서 안 멈춘다.
+    todo, errors = macro_read(text, px_per_cm)
 
-    def add_move(dx_px, dy_px, dur):
-        # 한 번에 옮기면 순간이동처럼 보인다. 잘게 나누고, 사람 손처럼
-        # 천천히 빨라졌다 천천히 느려지게 한다.
+    events = []
+    now = [0.0]
+
+    def add_move(dx_px, dy_px, dur, slow_start, slow_end):
+        # 한 번에 옮기면 순간이동처럼 보인다. 잘게 나눈다.
         steps = max(1, int(round(dur / MACRO_STEP)))
         done_x = done_y = 0
         for i in range(1, steps + 1):
             part = i / float(steps)
-            eased = part * part * (3.0 - 2.0 * part)
-            want_x = int(round(dx_px * eased))
-            want_y = int(round(dy_px * eased))
+            gone = macro_ease(part, slow_start, slow_end)
+            want_x = int(round(dx_px * gone))
+            want_y = int(round(dy_px * gone))
             step_x, step_y = want_x - done_x, want_y - done_y
             done_x, done_y = want_x, want_y
             if step_x or step_y:
@@ -786,14 +807,51 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
         flag = (MACRO_BTN_DOWN if press else MACRO_BTN_UP)[name]
         events.append(["m", round(now[0], 6), 0, 0, flag, 0, 0])
 
-    def add_click(name, times=1):
-        for i in range(times):
-            if i:
-                now[0] += MACRO_DOUBLE_GAP
-            add_button(name, True)
-            now[0] += MACRO_CLICK_HOLD
-            add_button(name, False)
+    for index, job in enumerate(todo):
+        kind = job[0]
+        if kind == "move":
+            # 앞뒤가 바로 이어지는 이동인지 본다. 쉬는 시간을 넣기로
+            # 했다면 어차피 끊기므로 이어진 것으로 보지 않는다.
+            prev_move = (gap <= 0 and index > 0
+                         and todo[index - 1][0] == "move")
+            next_move = (gap <= 0 and index + 1 < len(todo)
+                         and todo[index + 1][0] == "move")
+            add_move(job[1], job[2], job[3], not prev_move, not next_move)
+        elif kind == "click":
+            for round_no in range(job[2]):
+                if round_no:
+                    now[0] += MACRO_DOUBLE_GAP
+                add_button(job[1], True)
+                now[0] += MACRO_CLICK_HOLD
+                add_button(job[1], False)
+        elif kind == "button":
+            add_button(job[1], job[2])
+        elif kind == "wheel":
+            events.append(["m", round(now[0], 6), 0, 0,
+                           RI_MOUSE_WHEEL, job[1] * 120, 0])
+        elif kind == "wait":
+            now[0] += job[1]
+        if gap > 0 and index + 1 < len(todo):
+            now[0] += gap
 
+    # 끝으로 갈수록 느려지게 만들기 때문에, 마지막 몇 조각은 움직임이
+    # 반 칸도 안 되어 사라진다. 그대로 두면 "3초" 라고 적어도 기록은
+    # 2.8초로 끝나고, 반복할 때 쉬는 시간까지 어긋난다. 그래서 끝 자리에
+    # 아무것도 안 하는 표시를 하나 둬서 길이를 적은 대로 맞춘다.
+    # 소수점을 여섯 자리로 자르기 때문에 마지막 줄의 시각이 now 보다
+    # 아주 조금 작게 나온다. 그 차이로 표시를 넣으면 안 된다.
+    if events and now[0] - events[-1][1] > 0.001:
+        events.append(["m", round(now[0], 6), 0, 0, 0, 0, 0])
+    return events, errors
+
+
+def macro_read(text, px_per_cm):
+    """적은 글을 할 일 목록으로 바꾼다. (할 일, 잘못된 줄 안내) 를 준다.
+
+    여기서는 시간을 계산하지 않는다. 무엇을 할지만 고른다.
+    """
+    todo = []
+    errors = []
     for number, raw_line in enumerate(text.splitlines(), 1):
         line = raw_line.split("#", 1)[0].strip()
         if not line:
@@ -821,20 +879,20 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
                 if dur is None:
                     dur = max(MACRO_MIN_DUR, abs(amount) / MACRO_SPEED)
                 sign_x, sign_y = MACRO_DIRECTIONS[head]
-                add_move(amount * sign_x, amount * sign_y, dur)
+                todo.append(("move", amount * sign_x, amount * sign_y, dur))
                 continue
 
             if head in ("클릭", "좌클릭", "click"):
-                add_click("L")
+                todo.append(("click", "L", 1))
                 continue
             if head in ("우클릭", "오른쪽클릭", "rightclick"):
-                add_click("R")
+                todo.append(("click", "R", 1))
                 continue
             if head in ("휠클릭", "가운데클릭", "middleclick"):
-                add_click("M")
+                todo.append(("click", "M", 1))
                 continue
             if head in ("더블클릭", "두번클릭", "doubleclick"):
-                add_click("L", 2)
+                todo.append(("click", "L", 2))
                 continue
 
             if head in ("누르기", "누름", "press", "떼기", "뗌", "release"):
@@ -846,7 +904,7 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
                                   "모르겠습니다 (왼쪽/오른쪽/가운데)"
                                   % (number, rest[0]))
                     continue
-                add_button(name, press)
+                todo.append(("button", name, press))
                 continue
 
             if head in ("휠", "wheel"):
@@ -864,9 +922,7 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
                     errors.append("%d번째 줄: 휠은 한 번에 1000칸까지만 "
                                   "됩니다" % number)
                     continue
-                events.append(["m", round(now[0], 6), 0, 0,
-                               RI_MOUSE_WHEEL, notches * 120, 0])
-                now[0] += MACRO_CLICK_HOLD
+                todo.append(("wheel", notches))
                 continue
 
             # "0.5초" 한 마디만 적어도 되고, "기다리기 0.5초" 도 된다
@@ -874,7 +930,7 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
             if wait is not None and (len(words) == 1 or
                                      head in ("기다리기", "쉬기", "대기",
                                               "wait")):
-                now[0] += wait
+                todo.append(("wait", wait))
                 continue
 
             errors.append("%d번째 줄: '%s' 가 무슨 뜻인지 모르겠습니다"
@@ -882,16 +938,7 @@ def parse_macro(text, px_per_cm=PX_PER_CM):
         except Exception as e:                    # noqa: BLE001
             # 한 줄이 이상해도 나머지는 살린다
             errors.append("%d번째 줄: 읽다가 막혔습니다 (%s)" % (number, e))
-
-    # 끝으로 갈수록 느려지게 만들기 때문에, 마지막 몇 조각은 움직임이
-    # 반 칸도 안 되어 사라진다. 그대로 두면 "3초" 라고 적어도 기록은
-    # 2.8초로 끝나고, 반복할 때 쉬는 시간까지 어긋난다. 그래서 끝 자리에
-    # 아무것도 안 하는 표시를 하나 둬서 길이를 적은 대로 맞춘다.
-    # 소수점을 여섯 자리로 자르기 때문에 마지막 줄의 시각이 now 보다
-    # 아주 조금 작게 나온다. 그 차이로 표시를 넣으면 안 된다.
-    if events and now[0] - events[-1][1] > 0.001:
-        events.append(["m", round(now[0], 6), 0, 0, 0, 0, 0])
-    return events, errors
+    return todo, errors
 
 
 def clean_events(raw):
@@ -2134,6 +2181,7 @@ class App:
         self._macro_win = None
         self._macro_text = ""
         self._macro_px_per_cm = PX_PER_CM
+        self._macro_gap = 0.0
         self._pico_wait_t = 0.0
         self._rate_t = time.perf_counter()
         self.eng.log("프로그램 버전 {} · 이 표시가 바뀌지 않았으면 옛 파일이 그대로 도는 것입니다."
@@ -2537,6 +2585,11 @@ class App:
         cm.insert(0, str(self._macro_px_per_cm))
         cm.pack(side="left", padx=(4, 2))
         ttk.Label(bar, text="픽셀").pack(side="left")
+        ttk.Label(bar, text="   동작 사이 쉬기").pack(side="left")
+        gap = ttk.Entry(bar, width=5)
+        gap.insert(0, str(self._macro_gap))
+        gap.pack(side="left", padx=(4, 2))
+        ttk.Label(bar, text="초").pack(side="left")
 
         def say(text):
             """창 안에도 결과를 보여 준다. 로그는 큰 창에 있어서 가려진다."""
@@ -2559,10 +2612,19 @@ class App:
                     "사이로 적어 주세요.")
                 return False
             self._macro_px_per_cm = per_cm
+            try:
+                pause = float(gap.get())
+            except ValueError:
+                pause = -1.0
+            if not 0.0 <= pause <= 60.0:
+                say("동작 사이 쉬는 시간이 이상합니다. 0 에서 60 사이로 "
+                    "적어 주세요. 0 이면 이동이 이어집니다.")
+                return False
+            self._macro_gap = pause
             if self.eng.playing or self.eng.recording:
                 say("녹화나 재생 중에는 매크로를 바꿀 수 없습니다.")
                 return False
-            events, errors = parse_macro(text, per_cm)
+            events, errors = parse_macro(text, per_cm, pause)
             for one in errors[:8]:
                 self.eng.log(one)
             if len(errors) > 8:
