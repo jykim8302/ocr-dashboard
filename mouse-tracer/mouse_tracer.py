@@ -690,22 +690,12 @@ MACRO_BUTTONS = {
 MACRO_BTN_DOWN = {"L": 0x0001, "R": 0x0004, "M": 0x0010}
 MACRO_BTN_UP = {"L": 0x0002, "R": 0x0008, "M": 0x0020}
 
-MACRO_HELP = """적는 법 (한 줄에 하나씩)
-
-  오른쪽 3cm          오른쪽으로 3센치
-  왼쪽 200            왼쪽으로 200픽셀
-  위 1.5cm / 아래 50
-  오른쪽 3cm 1.5초     1.5초에 걸쳐 천천히
-
-  클릭                왼쪽 클릭
-  우클릭 / 휠클릭 / 더블클릭
-  누르기 / 떼기        누른 채로 끌 때 (누르기 → 이동 → 떼기)
-  누르기 오른쪽        오른쪽 버튼을 누른 채로
-
-  0.5초               쉬기
-  휠 3 / 휠 -3        휠 위로 3칸 / 아래로 3칸
-
-  # 로 시작하면 메모 (건너뜁니다)"""
+MACRO_HELP = """오른쪽 3cm   왼쪽 200     위 1.5cm    아래 50
+오른쪽 3cm 1.5초   (1.5초에 걸쳐 천천히)
+클릭   우클릭   휠클릭   더블클릭
+누르기 / 떼기   (누르기 -> 이동 -> 떼기 = 끌기)
+0.5초   (쉬기)        휠 3 / 휠 -3
+# 로 시작하면 메모"""
 
 
 def macro_amount(word, px_per_cm):
@@ -2492,7 +2482,8 @@ class App:
 
         win = tk.Toplevel(self.root)
         win.title("글로 매크로 만들기")
-        win.geometry("560x560")
+        win.geometry("620x620")
+        win.minsize(520, 380)
         self._macro_win = win
 
         def closed():
@@ -2501,22 +2492,41 @@ class App:
 
         win.protocol("WM_DELETE_WINDOW", closed)
 
-        ttk.Label(win, text=MACRO_HELP, justify="left",
-                  font=("맑은 고딕", 9)).pack(anchor="w", padx=12, pady=(10, 6))
+        # 단추 줄을 맨 먼저 아래쪽에 붙인다. 나중에 붙이면 위쪽 것들이
+        # 자리를 다 먹었을 때 창 밖으로 밀려나 보이지 않는다.
+        bar = ttk.Frame(win, padding=(12, 8))
+        bar.pack(side="bottom", fill="x")
+        state = ttk.Label(win, text="", padding=(12, 0, 12, 6))
+        state.pack(side="bottom", fill="x")
 
-        box = tk.Text(win, height=12, font=("Consolas", 11), wrap="none")
+        ttk.Label(win, text="한 줄에 하나씩 적고 아래 [만들기] 를 누르세요.",
+                  padding=(12, 10, 12, 4)).pack(anchor="w")
+
+        box = tk.Text(win, height=8, font=("Consolas", 11), wrap="none",
+                      undo=True)
         box.pack(fill="both", expand=True, padx=12)
         box.insert("1.0", self._macro_text or self.MACRO_SAMPLE)
 
-        bar = ttk.Frame(win, padding=(12, 8))
-        bar.pack(fill="x")
+        ttk.Label(win, text=MACRO_HELP, justify="left",
+                  font=("맑은 고딕", 9),
+                  padding=(12, 6, 12, 0)).pack(anchor="w")
+
         ttk.Label(bar, text="1cm =").pack(side="left")
         cm = ttk.Entry(bar, width=6)
         cm.insert(0, str(self._macro_px_per_cm))
         cm.pack(side="left", padx=(4, 2))
         ttk.Label(bar, text="픽셀").pack(side="left")
 
+        def say(text):
+            """창 안에도 결과를 보여 준다. 로그는 큰 창에 있어서 가려진다."""
+            try:
+                state.configure(text=text)
+            except Exception:
+                pass
+            self.eng.log(text)
+
         def make():
+            """적은 내용을 기록으로 만든다. 됐으면 True."""
             text = box.get("1.0", "end")
             self._macro_text = text
             try:
@@ -2524,13 +2534,13 @@ class App:
             except ValueError:
                 per_cm = 0.0
             if not 1.0 <= per_cm <= 1000.0:
-                self.eng.log("1cm 에 해당하는 픽셀 수가 이상합니다. "
-                             "1 에서 1000 사이로 적어 주세요.")
-                return
+                say("1cm 가 몇 픽셀인지가 이상합니다. 1 에서 1000 "
+                    "사이로 적어 주세요.")
+                return False
             self._macro_px_per_cm = per_cm
             if self.eng.playing or self.eng.recording:
-                self.eng.log("녹화나 재생 중에는 매크로를 바꿀 수 없습니다.")
-                return
+                say("녹화나 재생 중에는 매크로를 바꿀 수 없습니다.")
+                return False
             events, errors = parse_macro(text, per_cm)
             for one in errors[:8]:
                 self.eng.log(one)
@@ -2538,21 +2548,29 @@ class App:
                 self.eng.log("...그 밖에 {}줄 더 있습니다.".format(
                     len(errors) - 8))
             if not events:
-                self.eng.log("만들 동작이 없습니다. 적은 내용을 "
-                             "확인하세요.")
-                return
+                say("만들 동작이 없습니다. " + (errors[0] if errors else
+                                               "적은 내용을 확인하세요."))
+                return False
             self.eng.events = events
             self.eng.start_pos = None
-            self.eng.log("매크로를 만들었습니다: 동작 {}개 / {:.2f}초. "
-                         "{} 로 재생하세요.".format(
-                             len(events), self.eng.duration(),
-                             hotkey_text(self.eng.hotkeys["play"])))
+            note = "" if not errors else " (못 읽은 줄 {}개는 건너뜀)".format(
+                len(errors))
+            say("만들었습니다: 동작 {}개 / {:.2f}초{}. {} 로 재생하세요.".format(
+                len(events), self.eng.duration(), note,
+                hotkey_text(self.eng.hotkeys["play"])))
+            return True
 
+        def make_and_play():
+            if make():
+                self.toggle_play()
+
+        ttk.Button(bar, text="만들고 바로 재생",
+                   command=make_and_play).pack(side="right", padx=3)
+        ttk.Button(bar, text="만들기", command=make).pack(side="right", padx=3)
         ttk.Button(bar, text="예시 넣기",
                    command=lambda: (box.delete("1.0", "end"),
                                     box.insert("1.0", self.MACRO_SAMPLE))
                    ).pack(side="right", padx=3)
-        ttk.Button(bar, text="만들기", command=make).pack(side="right", padx=3)
 
     def _hush_pico(self):
         """아무것도 안 움직이는 묶음을 하나 보내 인사를 멈추게 한다."""

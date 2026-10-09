@@ -1357,6 +1357,24 @@ check("피코로 보낼 수 있는 상대 이동",
       all(e[6] & mt.MOUSE_MOVE_ABSOLUTE == 0 for e in _ev), "")
 
 print()
+# 단추 줄은 늘어나는 칸보다 먼저, 아래쪽에 붙여야 한다. 나중에 붙이면
+# 위쪽 것들이 자리를 다 먹었을 때 창 밖으로 밀려나 안 보인다
+# (실제로 "만들기" 단추가 안 보여서 재생이 안 됐다).
+_mac_src = io.open(TARGET, encoding="utf-8").read()
+_win = _mac_src[_mac_src.index("def open_macro"):
+                _mac_src.index("def _hush_pico")]
+check("단추 줄을 늘어나는 칸보다 먼저 붙임",
+      _win.index('bar.pack(side="bottom"') < _win.index('expand=True'), "")
+check("도움말이 단추를 밀어낼 만큼 길지 않음",
+      len(mt.MACRO_HELP.splitlines()) <= 8,
+      "%d줄" % len(mt.MACRO_HELP.splitlines()))
+check("창 안에도 결과를 보여줌", "state.configure(text=text)" in _win, "")
+check("만들고 바로 재생하는 길이 있음",
+      "만들고 바로 재생" in _win and "self.toggle_play()" in _win, "")
+check("만들기가 됐는지 알려줘야 바로 재생을 걸 수 있음",
+      "if make():" in _win and _win.count("return False") >= 3, "")
+
+print()
 print("=== 14-1. 포트를 못 열었을 때 이유 보여주기 ===")
 # 번호만 보여 주면 무엇을 해야 할지 알 수 없다. 자주 나오는 이유는
 # 할 일까지 같이 적어 준다.
