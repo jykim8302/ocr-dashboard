@@ -12,6 +12,7 @@
 
 import ctypes
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -28,6 +29,24 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 APP_NAME = "마우스 움직임 따라하기"
+
+
+def source_stamp():
+    """지금 돌고 있는 프로그램이 어느 것인지 알아볼 표시.
+
+    파일을 새 것으로 바꿨다고 생각했는데 옛 것이 그대로 도는 일이 잦다.
+    받을 때 이름이 "MouseTracer (1).bat" 처럼 바뀌어, 옛 파일을 계속
+    두 번 눌렀기 때문이다. 그래서 창과 로그에 이 표시를 띄워 두면
+    "바뀐 게 맞나" 를 한눈에 가릴 수 있다.
+    """
+    try:
+        path = os.path.abspath(__file__)
+        with open(path, "rb") as f:
+            short = hashlib.md5(f.read()).hexdigest()[:8]
+        when = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+        return "{} ({})".format(short, when.strftime("%m-%d %H:%M"))
+    except Exception:
+        return "알 수 없음"
 SIGNATURE = 0x5A6B7C8D  # 우리가 만든 입력을 다시 녹화하지 않기 위한 표식
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -1974,7 +1993,7 @@ class App:
     def __init__(self, root, engine):
         self.root = root
         self.eng = engine
-        root.title(APP_NAME)
+        root.title("{} [{}]".format(APP_NAME, source_stamp()))
         root.geometry("560x910")
         root.minsize(500, 660)
 
@@ -2117,6 +2136,8 @@ class App:
         self._macro_px_per_cm = PX_PER_CM
         self._pico_wait_t = 0.0
         self._rate_t = time.perf_counter()
+        self.eng.log("프로그램 버전 {} · 이 표시가 바뀌지 않았으면 옛 파일이 그대로 도는 것입니다."
+                     .format(source_stamp()))
         self._rate_n = 0
         self._rate = 0
 

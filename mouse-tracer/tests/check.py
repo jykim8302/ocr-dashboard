@@ -1490,6 +1490,170 @@ while not _quiet.eng.log_q.empty():
     _q3.append(_quiet.eng.log_q.get())
 check("그 안내도 한 번만 적음", _q3 == [], str(_q3))
 
+print("=== 14-3. 매크로 창의 단추를 실제로 눌러보기 ===")
+# 지금까지 창 쪽은 검사가 하나도 없어서, "만들기 단추가 창 밖으로 밀려나
+# 안 보인다" 같은 것을 아무도 못 잡았다. 가짜 위젯을 끼워 창을 실제로
+# 만들고 단추를 눌러 본다.
+
+class FakeW:
+    """가짜 위젯. 무엇이 어떤 차례로 붙었는지만 적어 둔다."""
+    order = []
+
+    def __init__(s, master=None, **kw):
+        s.master, s.kw, s.kids, s.packs = master, dict(kw), [], []
+        if master is not None and hasattr(master, "kids"):
+            master.kids.append(s)
+
+    def pack(s, **kw):
+        s.packs.append(kw)
+        FakeW.order.append((s, kw))
+        return s
+
+    grid = pack
+
+    def configure(s, **kw): s.kw.update(kw)
+    config = configure
+    def __setitem__(s, k, v): s.kw[k] = v
+    def __getitem__(s, k): return s.kw.get(k)
+    def title(s, *a): pass
+    def geometry(s, *a): pass
+    def minsize(s, *a): pass
+    def protocol(s, *a): pass
+    def destroy(s): pass
+    def lift(s): pass
+    def bind(s, *a, **k): pass
+    def columnconfigure(s, *a, **k): pass
+    def rowconfigure(s, *a, **k): pass
+    def yview(s, *a): pass
+    def see(s, *a): pass
+    def after(s, ms, fn=None, *a): pass
+
+
+class FakeText(FakeW):
+    def __init__(s, master=None, **kw):
+        FakeW.__init__(s, master, **kw); s.buf = ""
+    def insert(s, where, text, *tags): s.buf = text + s.buf
+    def delete(s, a, b=None): s.buf = ""
+    def get(s, a="1.0", b="end"): return s.buf
+
+
+class FakeEntry(FakeW):
+    def __init__(s, master=None, **kw):
+        FakeW.__init__(s, master, **kw); s.buf = ""
+    def insert(s, i, t): s.buf = s.buf[:i] + t + s.buf[i:]
+    def delete(s, a, b=None): s.buf = ""
+    def get(s): return s.buf
+
+
+for _m in (sys.modules["tkinter"], sys.modules["tkinter.ttk"]):
+    for _n in ("Frame", "Label", "Button", "Scrollbar", "Toplevel", "Tk",
+               "Checkbutton", "Combobox", "LabelFrame", "Labelframe"):
+        setattr(_m, _n, FakeW)
+    _m.Text, _m.Entry = FakeText, FakeEntry
+
+
+def find_button(node, label):
+    """그 글자가 적힌 단추를 찾는다."""
+    if node.kw.get("text") == label and node.kw.get("command"):
+        return node
+    for kid in node.kids:
+        got = find_button(kid, label)
+        if got is not None:
+            return got
+    return None
+
+
+def new_macro_app(played):
+    app = mt.App.__new__(mt.App)
+    app.eng = mt.Engine()
+    app.root = FakeW()
+    app._macro_win = None
+    app._macro_text = ""
+    app._macro_px_per_cm = mt.PX_PER_CM
+    app.toggle_play = lambda: played.append("재생")
+    return app
+
+
+_played = []
+_app = new_macro_app(_played)
+FakeW.order = []
+_app.open_macro()
+_win = _app._macro_win
+check("매크로 창이 열림", _win is not None, "")
+
+_mk = find_button(_win, "만들기")
+_pl = find_button(_win, "만들고 바로 재생")
+_ex = find_button(_win, "예시 넣기")
+check("만들기 단추가 있음", _mk is not None, "")
+check("만들고 바로 재생 단추가 있음", _pl is not None, "")
+check("예시 넣기 단추가 있음", _ex is not None, "")
+
+# 단추 줄이 늘어나는 칸보다 먼저 붙어야 창 밖으로 안 밀려난다
+_bottoms = [i for i, (_w, kw) in enumerate(FakeW.order)
+            if kw.get("side") == "bottom"]
+_grows = [i for i, (_w, kw) in enumerate(FakeW.order) if kw.get("expand")]
+check("단추 줄이 늘어나는 칸보다 먼저 붙음",
+      _bottoms and _grows and min(_bottoms) < min(_grows),
+      "아래쪽=%s 늘어남=%s" % (_bottoms, _grows))
+
+# 진짜로 눌러 본다
+_mk.kw["command"]()
+check("만들기를 누르면 기록이 생김", len(_app.eng.events) > 0,
+      "%d개" % len(_app.eng.events))
+check("만들기만으로는 재생하지 않음", _played == [], str(_played))
+_logs = []
+while not _app.eng.log_q.empty():
+    _logs.append(_app.eng.log_q.get())
+check("만들었다고 알려줌", any("만들었습니다" in m for m in _logs), str(_logs))
+
+_played2 = []
+_app2 = new_macro_app(_played2)
+_app2.open_macro()
+find_button(_app2._macro_win, "만들고 바로 재생").kw["command"]()
+check("만들고 바로 재생은 재생까지 함",
+      len(_app2.eng.events) > 0 and _played2 == ["재생"], str(_played2))
+
+# 1cm 값이 엉터리면 만들지도, 재생하지도 않아야 한다
+_played3 = []
+_app3 = new_macro_app(_played3)
+_app3.open_macro()
+for _kid in [_app3._macro_win] + _app3._macro_win.kids:
+    for _k2 in _kid.kids:
+        if isinstance(_k2, FakeEntry):
+            _k2.buf = "어쩌고"
+find_button(_app3._macro_win, "만들고 바로 재생").kw["command"]()
+check("1cm 가 엉터리면 재생도 안 함",
+      _app3.eng.events == [] and _played3 == [], str(_played3))
+
+# 적은 내용이 비면 만들 것이 없다고 해야 한다
+_played4 = []
+_app4 = new_macro_app(_played4)
+_app4.open_macro()
+for _kid in [_app4._macro_win] + _app4._macro_win.kids:
+    if isinstance(_kid, FakeText):
+        _kid.buf = "   \n\n"
+find_button(_app4._macro_win, "만들기").kw["command"]()
+_logs4 = []
+while not _app4.eng.log_q.empty():
+    _logs4.append(_app4.eng.log_q.get())
+check("빈 내용이면 만들 것이 없다고 알려줌",
+      _app4.eng.events == [] and any("없습니다" in m for m in _logs4),
+      str(_logs4))
+
+# 창에 들어 있던 예시가 그대로 만들어지는지 (예시가 틀리면 안 된다)
+_ev_sample, _er_sample = mt.parse_macro(mt.App.MACRO_SAMPLE)
+check("창에 든 예시에 틀린 줄이 없음", _er_sample == [], str(_er_sample))
+
+print()
+# 옛 파일이 그대로 도는지 한눈에 가릴 수 있어야 한다
+_stamp = mt.source_stamp()
+check("프로그램 표시를 만들 수 있음",
+      _stamp != "알 수 없음" and len(_stamp) > 8, _stamp)
+check("창 제목에 표시가 들어감", "source_stamp()" in _mac_src
+      and 'root.title("{} [{}]"' in _mac_src, "")
+check("시작할 때 로그에도 남김", "프로그램 버전 {}" in _mac_src, "")
+
+print()
 print("=== 15. 실행 파일이 지금 코드를 품고 있는지 ===")
 import base64 as _b64, hashlib as _hashlib
 bat_path = os.path.join(ROOT, "MouseTracer.bat")
