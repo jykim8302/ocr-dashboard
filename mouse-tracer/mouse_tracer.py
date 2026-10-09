@@ -665,6 +665,226 @@ MAX_SECONDS = 24 * 60 * 60     # 기록 길이의 상한 (하루)
 HOTKEY_TAIL_SECONDS = 0.5      # 이 시간 안에 남은 조합키는 단축키 흔적으로 본다
 
 
+# ---------- 글로 적어서 만드는 매크로
+#
+# 녹화하지 않고 "오른쪽 3cm" 처럼 적어서 기록을 만든다. 만들어진 기록은
+# 녹화한 것과 똑같은 모양이라, 재생도 피코도 저장도 그대로 쓸 수 있다.
+MACRO_STEP = 0.005        # 이동을 잘게 나누는 간격 (초)
+MACRO_SPEED = 900.0       # 시간을 안 적으면 초당 이만큼 움직인다 (픽셀)
+MACRO_MIN_DUR = 0.06      # 아무리 짧아도 이만큼은 쓴다 (초)
+MACRO_CLICK_HOLD = 0.06   # 누르고 떼기 사이 (초)
+MACRO_DOUBLE_GAP = 0.09   # 더블클릭의 두 번 사이 (초)
+PX_PER_CM = 37.8          # 보통 화면에서 1cm 에 해당하는 점 수
+
+MACRO_DIRECTIONS = {
+    "오른쪽": (1, 0), "우": (1, 0), "right": (1, 0),
+    "왼쪽": (-1, 0), "좌": (-1, 0), "left": (-1, 0),
+    "위": (0, -1), "위쪽": (0, -1), "up": (0, -1),
+    "아래": (0, 1), "아래쪽": (0, 1), "down": (0, 1),
+}
+MACRO_BUTTONS = {
+    "왼쪽": "L", "좌": "L", "left": "L", "": "L",
+    "오른쪽": "R", "우": "R", "right": "R",
+    "가운데": "M", "휠": "M", "중간": "M", "middle": "M",
+}
+MACRO_BTN_DOWN = {"L": 0x0001, "R": 0x0004, "M": 0x0010}
+MACRO_BTN_UP = {"L": 0x0002, "R": 0x0008, "M": 0x0020}
+
+MACRO_HELP = """적는 법 (한 줄에 하나씩)
+
+  오른쪽 3cm          오른쪽으로 3센치
+  왼쪽 200            왼쪽으로 200픽셀
+  위 1.5cm / 아래 50
+  오른쪽 3cm 1.5초     1.5초에 걸쳐 천천히
+
+  클릭                왼쪽 클릭
+  우클릭 / 휠클릭 / 더블클릭
+  누르기 / 떼기        누른 채로 끌 때 (누르기 → 이동 → 떼기)
+  누르기 오른쪽        오른쪽 버튼을 누른 채로
+
+  0.5초               쉬기
+  휠 3 / 휠 -3        휠 위로 3칸 / 아래로 3칸
+
+  # 로 시작하면 메모 (건너뜁니다)"""
+
+
+def macro_amount(word, px_per_cm):
+    """'3cm' '200' '1.5센치' 를 픽셀 수로 바꾼다. 못 읽으면 None."""
+    text = word.strip().lower()
+    scale = 1.0
+    for tag in ("cm", "센치", "센티미터", "센티"):
+        if text.endswith(tag):
+            text = text[:-len(tag)]
+            scale = px_per_cm
+            break
+    else:
+        for tag in ("px", "픽셀", "점"):
+            if text.endswith(tag):
+                text = text[:-len(tag)]
+                break
+    try:
+        value = float(text)
+    except ValueError:
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return value * scale
+
+
+def macro_seconds(word):
+    """'0.5초' '2s' 를 초로 바꾼다. 시간이 아니면 None."""
+    text = word.strip().lower()
+    for tag in ("초", "sec", "s"):
+        if text.endswith(tag):
+            try:
+                value = float(text[:-len(tag)])
+            except ValueError:
+                return None
+            if value != value or value < 0 or value > 3600:
+                return None
+            return value
+    return None
+
+
+def parse_macro(text, px_per_cm=PX_PER_CM):
+    """글로 적은 매크로를 재생할 수 있는 기록으로 바꾼다.
+
+    (기록, 잘못된 줄 안내 목록) 을 돌려준다. 잘못된 줄이 있어도 나머지는
+    그대로 만든다. 한 줄 틀렸다고 전부 버리면 고치기가 어렵다.
+    """
+    events = []
+    errors = []
+    now = [0.0]                 # 여기까지 흐른 시간
+
+    def add_move(dx_px, dy_px, dur):
+        # 한 번에 옮기면 순간이동처럼 보인다. 잘게 나누고, 사람 손처럼
+        # 천천히 빨라졌다 천천히 느려지게 한다.
+        steps = max(1, int(round(dur / MACRO_STEP)))
+        done_x = done_y = 0
+        for i in range(1, steps + 1):
+            part = i / float(steps)
+            eased = part * part * (3.0 - 2.0 * part)
+            want_x = int(round(dx_px * eased))
+            want_y = int(round(dy_px * eased))
+            step_x, step_y = want_x - done_x, want_y - done_y
+            done_x, done_y = want_x, want_y
+            if step_x or step_y:
+                events.append(["m", round(now[0] + dur * part, 6),
+                               step_x, step_y, 0, 0, 0])
+        now[0] += dur
+
+    def add_button(name, press):
+        flag = (MACRO_BTN_DOWN if press else MACRO_BTN_UP)[name]
+        events.append(["m", round(now[0], 6), 0, 0, flag, 0, 0])
+
+    def add_click(name, times=1):
+        for i in range(times):
+            if i:
+                now[0] += MACRO_DOUBLE_GAP
+            add_button(name, True)
+            now[0] += MACRO_CLICK_HOLD
+            add_button(name, False)
+
+    for number, raw_line in enumerate(text.splitlines(), 1):
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        words = line.replace(",", " ").split()
+        head = words[0].lower()
+        rest = words[1:]
+
+        try:
+            if head in MACRO_DIRECTIONS:
+                if not rest:
+                    errors.append("%d번째 줄: 얼마나 움직일지가 없습니다 "
+                                  "(예: %s 3cm)" % (number, words[0]))
+                    continue
+                amount = macro_amount(rest[0], px_per_cm)
+                if amount is None:
+                    errors.append("%d번째 줄: '%s' 를 길이로 못 읽었습니다 "
+                                  "(예: 3cm, 200)" % (number, rest[0]))
+                    continue
+                dur = macro_seconds(rest[1]) if len(rest) > 1 else None
+                if len(rest) > 1 and dur is None:
+                    errors.append("%d번째 줄: '%s' 를 시간으로 못 읽었습니다 "
+                                  "(예: 0.5초)" % (number, rest[1]))
+                    continue
+                if dur is None:
+                    dur = max(MACRO_MIN_DUR, abs(amount) / MACRO_SPEED)
+                sign_x, sign_y = MACRO_DIRECTIONS[head]
+                add_move(amount * sign_x, amount * sign_y, dur)
+                continue
+
+            if head in ("클릭", "좌클릭", "click"):
+                add_click("L")
+                continue
+            if head in ("우클릭", "오른쪽클릭", "rightclick"):
+                add_click("R")
+                continue
+            if head in ("휠클릭", "가운데클릭", "middleclick"):
+                add_click("M")
+                continue
+            if head in ("더블클릭", "두번클릭", "doubleclick"):
+                add_click("L", 2)
+                continue
+
+            if head in ("누르기", "누름", "press", "떼기", "뗌", "release"):
+                press = head in ("누르기", "누름", "press")
+                word = rest[0].lower() if rest else ""
+                name = MACRO_BUTTONS.get(word)
+                if name is None:
+                    errors.append("%d번째 줄: '%s' 가 어느 버튼인지 "
+                                  "모르겠습니다 (왼쪽/오른쪽/가운데)"
+                                  % (number, rest[0]))
+                    continue
+                add_button(name, press)
+                continue
+
+            if head in ("휠", "wheel"):
+                if not rest:
+                    errors.append("%d번째 줄: 휠을 몇 칸 돌릴지가 없습니다 "
+                                  "(예: 휠 3)" % number)
+                    continue
+                try:
+                    notches = int(round(float(rest[0])))
+                except ValueError:
+                    errors.append("%d번째 줄: '%s' 를 칸 수로 못 "
+                                  "읽었습니다" % (number, rest[0]))
+                    continue
+                if not -1000 <= notches <= 1000:
+                    errors.append("%d번째 줄: 휠은 한 번에 1000칸까지만 "
+                                  "됩니다" % number)
+                    continue
+                events.append(["m", round(now[0], 6), 0, 0,
+                               RI_MOUSE_WHEEL, notches * 120, 0])
+                now[0] += MACRO_CLICK_HOLD
+                continue
+
+            # "0.5초" 한 마디만 적어도 되고, "기다리기 0.5초" 도 된다
+            wait = macro_seconds(words[-1])
+            if wait is not None and (len(words) == 1 or
+                                     head in ("기다리기", "쉬기", "대기",
+                                              "wait")):
+                now[0] += wait
+                continue
+
+            errors.append("%d번째 줄: '%s' 가 무슨 뜻인지 모르겠습니다"
+                          % (number, words[0]))
+        except Exception as e:                    # noqa: BLE001
+            # 한 줄이 이상해도 나머지는 살린다
+            errors.append("%d번째 줄: 읽다가 막혔습니다 (%s)" % (number, e))
+
+    # 끝으로 갈수록 느려지게 만들기 때문에, 마지막 몇 조각은 움직임이
+    # 반 칸도 안 되어 사라진다. 그대로 두면 "3초" 라고 적어도 기록은
+    # 2.8초로 끝나고, 반복할 때 쉬는 시간까지 어긋난다. 그래서 끝 자리에
+    # 아무것도 안 하는 표시를 하나 둬서 길이를 적은 대로 맞춘다.
+    # 소수점을 여섯 자리로 자르기 때문에 마지막 줄의 시각이 now 보다
+    # 아주 조금 작게 나온다. 그 차이로 표시를 넣으면 안 된다.
+    if events and now[0] - events[-1][1] > 0.001:
+        events.append(["m", round(now[0], 6), 0, 0, 0, 0, 0])
+    return events, errors
+
+
 def clean_events(raw):
     """불러온 기록이 쓸 수 있는 모양인지 본다. 아니면 None 을 돌려준다.
 
@@ -1850,6 +2070,11 @@ class App:
         ttk.Button(fio, text="파일로 저장", command=self.on_save).pack(side="left", expand=True, fill="x", padx=3)
         ttk.Button(fio, text="파일 불러오기", command=self.on_load).pack(side="left", expand=True, fill="x", padx=3)
 
+        fmac = ttk.Frame(root, padding=(10, 2))
+        fmac.pack(fill="x")
+        ttk.Button(fmac, text="글로 매크로 만들기 (녹화 없이)",
+                   command=self.open_macro).pack(fill="x", padx=3)
+
         diag = ttk.Frame(root, padding=(10, 2))
         diag.pack(fill="x")
         ttk.Button(diag, text="재생 입력이 Raw Input 으로 잡히는지 검사",
@@ -1897,6 +2122,9 @@ class App:
 
         self._pico_rx = b""
         self._pico_greeted = False
+        self._macro_win = None
+        self._macro_text = ""
+        self._macro_px_per_cm = PX_PER_CM
         self._pico_wait_t = 0.0
         self._rate_t = time.perf_counter()
         self._rate_n = 0
@@ -2246,6 +2474,85 @@ class App:
             text = line.decode("utf-8", "replace").strip()
             if text:
                 self._say_pico_line(text)
+
+    MACRO_SAMPLE = ("오른쪽 3cm\n"
+                    "클릭\n"
+                    "0.5초\n"
+                    "아래 2cm 1초\n"
+                    "우클릭\n")
+
+    def open_macro(self):
+        """녹화하지 않고 글로 적어서 기록을 만드는 창을 연다."""
+        if getattr(self, "_macro_win", None) is not None:
+            try:
+                self._macro_win.lift()
+                return
+            except Exception:
+                self._macro_win = None
+
+        win = tk.Toplevel(self.root)
+        win.title("글로 매크로 만들기")
+        win.geometry("560x560")
+        self._macro_win = win
+
+        def closed():
+            self._macro_win = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", closed)
+
+        ttk.Label(win, text=MACRO_HELP, justify="left",
+                  font=("맑은 고딕", 9)).pack(anchor="w", padx=12, pady=(10, 6))
+
+        box = tk.Text(win, height=12, font=("Consolas", 11), wrap="none")
+        box.pack(fill="both", expand=True, padx=12)
+        box.insert("1.0", self._macro_text or self.MACRO_SAMPLE)
+
+        bar = ttk.Frame(win, padding=(12, 8))
+        bar.pack(fill="x")
+        ttk.Label(bar, text="1cm =").pack(side="left")
+        cm = ttk.Entry(bar, width=6)
+        cm.insert(0, str(self._macro_px_per_cm))
+        cm.pack(side="left", padx=(4, 2))
+        ttk.Label(bar, text="픽셀").pack(side="left")
+
+        def make():
+            text = box.get("1.0", "end")
+            self._macro_text = text
+            try:
+                per_cm = float(cm.get())
+            except ValueError:
+                per_cm = 0.0
+            if not 1.0 <= per_cm <= 1000.0:
+                self.eng.log("1cm 에 해당하는 픽셀 수가 이상합니다. "
+                             "1 에서 1000 사이로 적어 주세요.")
+                return
+            self._macro_px_per_cm = per_cm
+            if self.eng.playing or self.eng.recording:
+                self.eng.log("녹화나 재생 중에는 매크로를 바꿀 수 없습니다.")
+                return
+            events, errors = parse_macro(text, per_cm)
+            for one in errors[:8]:
+                self.eng.log(one)
+            if len(errors) > 8:
+                self.eng.log("...그 밖에 {}줄 더 있습니다.".format(
+                    len(errors) - 8))
+            if not events:
+                self.eng.log("만들 동작이 없습니다. 적은 내용을 "
+                             "확인하세요.")
+                return
+            self.eng.events = events
+            self.eng.start_pos = None
+            self.eng.log("매크로를 만들었습니다: 동작 {}개 / {:.2f}초. "
+                         "{} 로 재생하세요.".format(
+                             len(events), self.eng.duration(),
+                             hotkey_text(self.eng.hotkeys["play"])))
+
+        ttk.Button(bar, text="예시 넣기",
+                   command=lambda: (box.delete("1.0", "end"),
+                                    box.insert("1.0", self.MACRO_SAMPLE))
+                   ).pack(side="right", padx=3)
+        ttk.Button(bar, text="만들기", command=make).pack(side="right", padx=3)
 
     def _hush_pico(self):
         """아무것도 안 움직이는 묶음을 하나 보내 인사를 멈추게 한다."""

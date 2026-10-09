@@ -1233,6 +1233,130 @@ check("겹쳤다고 알려줌", any("겹쳐서" in l for l in logs), str(logs))
 
 
 print()
+print("=== 13-9. 글로 적어서 만드는 매크로 ===")
+
+def mac(text, per_cm=mt.PX_PER_CM):
+    return mt.parse_macro(text, per_cm)
+
+# 길이가 정확히 나오는가 (1cm = 37.8픽셀이면 3cm = 113픽셀)
+_ev, _er = mac("오른쪽 3cm")
+check("오른쪽 3cm 오류 없음", _er == [], str(_er))
+check("3cm 만큼 정확히 오른쪽으로",
+      (sum(e[2] for e in _ev), sum(e[3] for e in _ev))
+      == (int(round(3 * mt.PX_PER_CM)), 0),
+      "x=%d y=%d" % (sum(e[2] for e in _ev), sum(e[3] for e in _ev)))
+
+# 네 방향이 제 쪽으로 가는가
+for _word, _want in (("오른쪽 100", (100, 0)), ("왼쪽 100", (-100, 0)),
+                     ("위 100", (0, -100)), ("아래 100", (0, 100))):
+    _ev, _er = mac(_word)
+    _got = (sum(e[2] for e in _ev), sum(e[3] for e in _ev))
+    check("%s 방향 맞음" % _word, _got == _want and _er == [], str(_got))
+
+# 단위를 바꿔 적어도 같은 뜻
+for _same in ("오른쪽 200", "오른쪽 200px", "오른쪽 200픽셀", "오른쪽 200점"):
+    _ev, _er = mac(_same)
+    check("'%s' 는 200픽셀" % _same,
+          sum(e[2] for e in _ev) == 200 and _er == [], str(_er))
+for _same in ("오른쪽 2cm", "오른쪽 2센치", "오른쪽 2센티"):
+    _ev, _er = mac(_same)
+    check("'%s' 는 cm 로 셈" % _same,
+          sum(e[2] for e in _ev) == int(round(2 * mt.PX_PER_CM)), str(_er))
+_ev, _er = mac("오른쪽 2cm", 50.0)
+check("1cm 를 바꾸면 길이도 바뀜", sum(e[2] for e in _ev) == 100, str(_ev[:2]))
+
+# 한 번에 옮기지 않고 나눠서 움직여야 한다 (순간이동처럼 보이면 안 됨)
+_ev, _er = mac("오른쪽 3cm")
+check("한 번에 안 옮기고 나눠 움직임", len(_ev) >= 10, "%d조각" % len(_ev))
+check("한 조각이 너무 크지 않음",
+      all(abs(e[2]) <= 20 and abs(e[3]) <= 20 for e in _ev),
+      str(max(abs(e[2]) for e in _ev)))
+# 사람 손처럼 천천히 빨라졌다 느려져야 한다
+_mid = max(abs(e[2]) for e in _ev[len(_ev) // 3:2 * len(_ev) // 3])
+check("가운데가 양끝보다 빠름", abs(_ev[0][2]) < _mid and abs(_ev[-1][2]) < _mid,
+      "처음=%d 가운데=%d 끝=%d" % (_ev[0][2], _mid, _ev[-1][2]))
+
+# 시간
+_ev, _er = mac("오른쪽 3cm 1.5초")
+check("적은 시간만큼 걸림", abs(_ev[-1][1] - 1.5) < 0.01, str(_ev[-1][1]))
+# 끝으로 갈수록 느려져서 마지막 조각이 사라지기 때문에, 길이를 맞춰 주지
+# 않으면 "3초" 라고 적어도 기록은 더 짧게 끝난다 (실제로 그랬다).
+_ev, _er = mac("오른쪽 3cm 3초\n아래 3cm 2초")
+check("여러 줄이어도 전체 길이가 맞음", abs(_ev[-1][1] - 5.0) < 0.01,
+      str(_ev[-1][1]))
+check("길이를 맞추려고 넣은 표시는 아무것도 안 함",
+      _ev[-1][2] == 0 and _ev[-1][3] == 0 and _ev[-1][4] == 0, str(_ev[-1]))
+_ev, _er = mac("0.5초")
+check("'0.5초' 만 적으면 쉬기", _ev == [] and _er == [], str((_ev, _er)))
+_ev, _er = mac("오른쪽 10\n기다리기 2초\n오른쪽 10")
+check("쉬는 동안 시간이 흐름", _ev[-1][1] > 2.0, str(_ev[-1][1]))
+
+# 버튼
+_ev, _er = mac("클릭")
+check("클릭은 누르고 뗌", [e[4] for e in _ev] == [0x0001, 0x0002], str(_ev))
+check("누르고 떼기 사이에 시간이 있음", _ev[1][1] > _ev[0][1], str(_ev))
+_ev, _er = mac("우클릭")
+check("우클릭은 오른쪽 버튼", [e[4] for e in _ev] == [0x0004, 0x0008], str(_ev))
+_ev, _er = mac("휠클릭")
+check("휠클릭은 가운데 버튼", [e[4] for e in _ev] == [0x0010, 0x0020], str(_ev))
+_ev, _er = mac("더블클릭")
+check("더블클릭은 두 번",
+      [e[4] for e in _ev] == [0x0001, 0x0002, 0x0001, 0x0002], str(_ev))
+
+# 끌기 (누른 채로 이동)
+_ev, _er = mac("누르기\n오른쪽 100\n떼기")
+check("끌기: 누름 -> 이동 -> 뗌",
+      _er == [] and _ev[0][4] == 0x0001 and _ev[-1][4] == 0x0002
+      and sum(e[2] for e in _ev) == 100, str(_er))
+_ev, _er = mac("누르기 오른쪽\n떼기 오른쪽")
+check("어느 버튼을 누를지 고를 수 있음",
+      [e[4] for e in _ev] == [0x0004, 0x0008], str(_ev))
+
+# 휠
+_ev, _er = mac("휠 3")
+check("휠 3칸", _ev[0][4] == mt.RI_MOUSE_WHEEL and _ev[0][5] == 360, str(_ev))
+_ev, _er = mac("휠 -2")
+check("휠 아래로 2칸", _ev[0][5] == -240, str(_ev))
+
+# 메모와 빈 줄
+_ev, _er = mac("# 이건 메모\n\n오른쪽 50   # 뒤에 붙은 메모")
+check("메모와 빈 줄은 건너뜀",
+      _er == [] and sum(e[2] for e in _ev) == 50, str(_er))
+
+# 잘못 적었을 때: 그 줄만 알려주고 나머지는 살린다
+_ev, _er = mac("오른쪽 50\n이상한말\n오른쪽 50")
+check("모르는 말은 몇 번째 줄인지 알려줌",
+      len(_er) == 1 and _er[0].startswith("2번째 줄"), str(_er))
+check("틀린 줄이 있어도 나머지는 살림", sum(e[2] for e in _ev) == 100,
+      str(sum(e[2] for e in _ev)))
+_ev, _er = mac("오른쪽")
+check("길이를 안 적으면 알려줌", len(_er) == 1 and "얼마나" in _er[0], str(_er))
+_ev, _er = mac("오른쪽 어쩌고")
+check("길이를 못 읽으면 알려줌", len(_er) == 1 and "길이" in _er[0], str(_er))
+_ev, _er = mac("오른쪽 10 어쩌고")
+check("시간을 못 읽으면 알려줌", len(_er) == 1 and "시간" in _er[0], str(_er))
+_ev, _er = mac("누르기 어쩌고")
+check("모르는 버튼이면 알려줌", len(_er) == 1 and "버튼" in _er[0], str(_er))
+
+# 이상한 값이 재생까지 흘러가면 안 된다
+for _bad in ("오른쪽 nan", "오른쪽 inf", "오른쪽 -inf"):
+    _ev, _er = mac(_bad)
+    check("'%s' 는 거부" % _bad, _ev == [] and len(_er) == 1, str(_er))
+_ev, _er = mac("휠 99999")
+check("휠을 너무 많이 돌리면 거부", _ev == [] and len(_er) == 1, str(_er))
+
+# 만든 기록은 녹화한 것과 같은 모양이어야 한다 (재생/저장/피코 그대로)
+_ev, _er = mac("오른쪽 3cm\n클릭\n0.5초\n누르기\n아래 2cm\n떼기\n휠 -3")
+check("만든 기록이 불러오기 검사를 통과", mt.clean_events(_ev) is not None, "")
+check("시간이 거꾸로 가지 않음",
+      all(_ev[i][1] <= _ev[i + 1][1] for i in range(len(_ev) - 1)), "")
+_eng_m = mt.Engine(); _eng_m.events = _ev
+check("길이를 셀 수 있음", _eng_m.duration() > 0, str(_eng_m.duration()))
+# 피코로도 나갈 수 있어야 한다 (절대좌표가 아니라 상대 이동이어야 함)
+check("피코로 보낼 수 있는 상대 이동",
+      all(e[6] & mt.MOUSE_MOVE_ABSOLUTE == 0 for e in _ev), "")
+
+print()
 print("=== 14-1. 포트를 못 열었을 때 이유 보여주기 ===")
 # 번호만 보여 주면 무엇을 해야 할지 알 수 없다. 자주 나오는 이유는
 # 할 일까지 같이 적어 준다.
