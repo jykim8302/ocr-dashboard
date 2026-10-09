@@ -1803,6 +1803,86 @@ class Engine:
             self.selftest_running = False
 
     # ---------- 마우스 가속 임시 해제 (재생 후 원래대로 복구)
+    def measure_scale(self, precise=True, counts=600, step=6):
+        """보낸 칸 수에 견주어 커서가 화면에서 몇 점 움직이는지 잰다.
+
+        매크로는 "칸" 을 내보내고, 화면에서 몇 점이 되는지는 Windows 의
+        포인터 속도와 가속이 정한다. 그래서 같은 3cm 라도 설정에 따라
+        가는 거리가 달라진다. 재 보면 그 비율을 바로 알 수 있다.
+
+        (보낸 칸, 움직인 점, 한 칸당 점) 을 돌려준다. 못 재면 None.
+        """
+        if self.playing or self.recording:
+            self.log("녹화나 재생 중에는 잴 수 없습니다.")
+            return None
+        before = POINT()
+        if not user32.GetCursorPos(ctypes.byref(before)):
+            self.log("커서 위치를 읽지 못했습니다.")
+            return None
+
+        # 화면 끝에 붙어 있으면 더 못 가서 엉뚱한 값이 나온다.
+        # 넓은 쪽으로 민다.
+        width = int(user32.GetSystemMetrics(0) or 1920)
+        sign = -1 if before.x > width // 2 else 1
+
+        self.move_flags = MOUSEEVENTF_MOVE | MOUSEEVENTF_MOVE_NOCOALESCE
+        self.send_fail = 0
+        self.use_legacy = False
+        self.pico_btn = 0
+        self._pico_dx = self._pico_dy = self._pico_wheel = 0
+        self._pico_sent_btn = 0
+        self._pico_flush_t = 0.0
+        self._pico_hold_t = 0.0
+        self._pico_warned = set()
+        try:
+            winmm.timeBeginPeriod(1)
+        except Exception:
+            pass
+        if precise:
+            self._disable_accel()
+        try:
+            self._push(sign * counts, step)
+            time.sleep(0.2)          # 보드와 드라이버가 다 내보낼 때까지
+            after = POINT()
+            user32.GetCursorPos(ctypes.byref(after))
+            moved = abs(after.x - before.x)
+            # 제자리로 돌려놓는다
+            self._push(-sign * counts, step)
+            time.sleep(0.2)
+            user32.SetCursorPos(before.x, before.y)
+        finally:
+            self._restore_mouse()
+            try:
+                winmm.timeEndPeriod(1)
+            except Exception:
+                pass
+
+        if moved == 0:
+            self.log("재 보기 실패: 커서가 움직이지 않았습니다. 재생이 "
+                     "되는 상태인지 먼저 확인하세요.")
+            return None
+        ratio = moved / float(counts)
+        self.log("재 보기: {}칸 보냈더니 화면에서 {}점 움직였습니다 "
+                 "(한 칸 = {:.2f}점).".format(counts, moved, ratio))
+        if abs(ratio - 1.0) > 0.08:
+            self.log("한 칸이 1점이 아닙니다. Windows 의 포인터 속도나 "
+                     "가속 때문입니다. 정밀 모드를 켜고 다시 재 보세요. "
+                     "그래도 같으면 아래 1cm 값을 고쳐 맞추세요.")
+        return counts, moved, ratio
+
+    def _push(self, total, step):
+        """이동량을 잘게 나눠 지금 쓰는 길로 내보낸다."""
+        gone = 0
+        one = step if total > 0 else -step
+        while abs(gone) < abs(total):
+            if abs(total - gone) < abs(one):
+                one = total - gone
+            self._emit([mouse_input(one, 0, 0, self.move_flags)])
+            gone += one
+            time.sleep(0.005)
+        if self.use_pico and self.pico.handle:
+            self._pico_flush()
+
     def _disable_accel(self):
         self._saved_mouse = None
         try:
@@ -1907,12 +1987,24 @@ class Engine:
                 "무한" if total < 0 else total, speed,
                 hotkey_text(self.hotkeys["play"]),
                 hotkey_text(self.hotkeys["stop"])))
+            if goto_start and not self.start_pos:
+                # 글로 만든 매크로에는 "녹화 시작 위치" 가 없다. 그대로
+                # 두면 반복할 때마다 한 방향으로 계속 밀려난다. 재생을
+                # 시작한 자리를 기억해 두었다가 매번 거기서 시작한다.
+                here = POINT()
+                if user32.GetCursorPos(ctypes.byref(here)):
+                    start_here = (here.x, here.y)
+                else:
+                    start_here = None
+            else:
+                start_here = self.start_pos
+
             while total < 0 or count < total:
                 if self._stop_play.is_set():
                     break
                 count += 1
-                if goto_start and self.start_pos:
-                    user32.SetCursorPos(self.start_pos[0], self.start_pos[1])
+                if goto_start and start_here:
+                    user32.SetCursorPos(start_here[0], start_here[1])
                     time.sleep(0.03)
                 t0 = time.perf_counter()
                 for ev in self.events:
@@ -2650,6 +2742,34 @@ class App:
         ttk.Button(bar, text="만들고 바로 재생",
                    command=make_and_play).pack(side="right", padx=3)
         ttk.Button(bar, text="만들기", command=make).pack(side="right", padx=3)
+        def measure():
+            if self.eng.playing or self.eng.recording:
+                say("녹화나 재생 중에는 잴 수 없습니다.")
+                return
+
+            def work():
+                got = self.eng.measure_scale(self.v_prec.get())
+                if not got:
+                    return
+                _counts, _moved, ratio = got
+                if ratio <= 0:
+                    return
+                # 한 칸이 1점이 아니면, cm 가 화면에서 맞도록 고쳐 준다
+                fixed = round(PX_PER_CM / ratio, 1)
+                try:
+                    cm.delete(0, "end")
+                    cm.insert(0, str(fixed))
+                    self._macro_px_per_cm = fixed
+                    state.configure(
+                        text="한 칸 = {:.2f}점. 1cm 를 {} 로 맞췄습니다."
+                             .format(ratio, fixed))
+                except Exception:
+                    pass
+
+            threading.Thread(target=work, daemon=True).start()
+
+        ttk.Button(bar, text="재보기", command=measure).pack(side="right",
+                                                             padx=3)
         ttk.Button(bar, text="예시 넣기",
                    command=lambda: (box.delete("1.0", "end"),
                                     box.insert("1.0", self.MACRO_SAMPLE))

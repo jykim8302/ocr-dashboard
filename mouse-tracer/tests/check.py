@@ -1423,6 +1423,111 @@ check("만들기가 됐는지 알려줘야 바로 재생을 걸 수 있음",
       "if make():" in _win and _win.count("return False") >= 3, "")
 
 print()
+print("=== 13-10. 반복할 때 밀려나지 않기 / 길이 재보기 ===")
+# 글로 만든 매크로에는 "녹화 시작 위치" 가 없다. 그대로 두면 반복할
+# 때마다 한 방향으로 계속 밀려난다 (실제로 그랬다).
+_cursor = {"x": 500, "y": 400}
+_jumps = []
+mt.user32.GetCursorPos = lambda ptr: (
+    setattr(ptr._obj, "x", _cursor["x"]),
+    setattr(ptr._obj, "y", _cursor["y"]), 1)[2]
+mt.user32.SetCursorPos = lambda x, y: (_jumps.append((x, y)), 1)[1]
+mt.send = lambda b: len(b)
+
+_er = mt.Engine()
+_er.events, _ = mt.parse_macro("오른쪽 100")
+_er.start_pos = None
+_er._play_worker(3, 1.0, True, False, 0)     # 커서 이동 켜고 3번
+check("매크로도 반복할 때 시작 자리로 돌아옴", len(_jumps) == 3, str(_jumps))
+check("돌아오는 자리가 재생을 시작한 자리",
+      all(j == (500, 400) for j in _jumps), str(_jumps))
+
+# 녹화한 기록은 원래대로 녹화 시작 위치를 쓴다
+_jumps[:] = []
+_er2 = mt.Engine()
+_er2.events, _ = mt.parse_macro("오른쪽 100")
+_er2.start_pos = (111, 222)
+_er2._play_worker(2, 1.0, True, False, 0)
+check("녹화한 기록은 녹화 시작 위치를 그대로 씀",
+      _jumps == [(111, 222), (111, 222)], str(_jumps))
+
+# 커서 이동을 끄면 아무 데도 안 옮긴다
+_jumps[:] = []
+_er3 = mt.Engine()
+_er3.events, _ = mt.parse_macro("오른쪽 100")
+_er3.start_pos = None
+_er3._play_worker(2, 1.0, False, False, 0)
+check("커서 이동을 끄면 안 옮김", _jumps == [], str(_jumps))
+
+# 길이 재보기: 보낸 칸과 화면에서 움직인 점의 비율을 낸다
+mt.user32.GetSystemMetrics = lambda i: 1920
+
+
+def fake_cursor(scale):
+    """보낸 칸의 scale 배만큼 커서가 움직이는 화면을 흉내 낸다."""
+    _cursor["x"] = 500
+    sent = {"n": 0}
+
+    def emit(batch):
+        for one in batch:
+            sent["n"] += one.mi.dx
+        _cursor["x"] = 500 + int(sent["n"] * scale)
+    return emit
+
+
+for _scale, _label in ((1.0, "1배"), (2.0, "2배"), (0.5, "반배")):
+    _em = mt.Engine()
+    _em._emit = fake_cursor(_scale)
+    _em._disable_accel = lambda: None
+    _em._restore_mouse = lambda: None
+    _got = _em.measure_scale(precise=False, counts=120, step=40)
+    check("재보기가 %s 를 알아냄" % _label,
+          _got is not None and abs(_got[2] - _scale) < 0.05,
+          str(_got))
+
+_logs = []
+_em = mt.Engine()
+_em._emit = fake_cursor(2.0)
+_em._disable_accel = lambda: None
+_em._restore_mouse = lambda: None
+_em.measure_scale(precise=False, counts=120, step=40)
+while not _em.log_q.empty():
+    _logs.append(_em.log_q.get())
+check("한 칸이 1점이 아니면 알려줌",
+      any("정밀 모드" in m for m in _logs), str(_logs))
+
+_em2 = mt.Engine()
+_em2._emit = fake_cursor(1.0)
+_em2._disable_accel = lambda: None
+_em2._restore_mouse = lambda: None
+_em2.measure_scale(precise=False, counts=120, step=40)
+_logs2 = []
+while not _em2.log_q.empty():
+    _logs2.append(_em2.log_q.get())
+check("1점이면 괜한 걱정을 안 시킴",
+      not any("정밀 모드" in m for m in _logs2), str(_logs2))
+
+# 안 움직이면 안 움직였다고 해야 한다 (엉뚱한 비율을 내면 안 된다)
+_em3 = mt.Engine()
+_em3._emit = lambda batch: None
+_em3._disable_accel = lambda: None
+_em3._restore_mouse = lambda: None
+_cursor["x"] = 500
+check("안 움직이면 비율을 내지 않음",
+      _em3.measure_scale(precise=False, counts=120, step=40) is None, "")
+
+# 화면 오른쪽 끝에 붙어 있으면 왼쪽으로 밀어야 한다
+_cursor["x"] = 1900
+_dirs = []
+_em4 = mt.Engine()
+_em4._emit = lambda batch: _dirs.append(batch[0].mi.dx)
+_em4._disable_accel = lambda: None
+_em4._restore_mouse = lambda: None
+_em4.measure_scale(precise=False, counts=120, step=40)
+check("오른쪽 끝에서는 왼쪽으로 밀어서 잼", _dirs and _dirs[0] < 0,
+      str(_dirs[:3]))
+
+print()
 print("=== 14-1. 포트를 못 열었을 때 이유 보여주기 ===")
 # 번호만 보여 주면 무엇을 해야 할지 알 수 없다. 자주 나오는 이유는
 # 할 일까지 같이 적어 준다.
@@ -1734,6 +1839,10 @@ _macro_code = _mac_src[_mac_src.index("def open_macro"):
                        _mac_src.index("def _hush_pico")]
 check("창에 동작 사이 쉬기 칸이 있음", "동작 사이 쉬기" in _macro_code, "")
 check("쉬기 칸 기본값이 0", "self._macro_gap = 0.0" in _mac_src, "")
+check("창에 재보기 단추가 있음",
+      find_button(_win, "재보기") is not None, "")
+check("재보기는 정밀 모드 설정을 그대로 씀",
+      "measure_scale(self.v_prec.get())" in _macro_code, "")
 check("쉬기가 엉터리면 만들지 않음",
       "0.0 <= pause <= 60.0" in _macro_code
       and "parse_macro(text, per_cm, pause)" in _macro_code, "")
