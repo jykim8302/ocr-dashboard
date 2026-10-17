@@ -1,0 +1,29 @@
+name: pixel-clicker Windows test
+
+on:
+  push:
+    paths:
+      - "tools/pixel_clicker/**"
+      - ".github/workflows/pixel-clicker-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -r tools/pixel_clicker/requirements.txt
+      - name: Run real Windows test (keys, mouse, screen)
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tools/pixel_clicker/test_windows.py
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-clicker-screenshots
+          path: tools/pixel_clicker/test_output/
