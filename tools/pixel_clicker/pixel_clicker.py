@@ -70,9 +70,10 @@ def make_combo(pressed):
     return "+".join(mods + others) if len(others) == 1 else None
 
 
-def to_pynput(combo):
-    """'ctrl+alt+s', 'f8'을 pynput 형식('<ctrl>+<alt>+s', '<f8>')으로 바꾼다."""
-    return "+".join(k if len(k) == 1 else f"<{k}>" for k in combo.split("+"))
+def split_combo(combo):
+    """'ctrl+alt+s' -> ({'ctrl', 'alt'}, 's')"""
+    keys = combo.split("+")
+    return {k for k in keys if k in MODIFIERS}, next(k for k in keys if k not in MODIFIERS)
 
 
 # ---------- 화면 처리 ----------
@@ -155,10 +156,13 @@ class App:
         self.log.grid(row=5, column=0, columnspan=3, sticky="ew", **pad)
 
         r.update_idletasks()
-        if self.settings["window"]:
-            r.geometry(self.settings["window"])  # 지난번 창 위치
-        else:
-            r.geometry(f"+{r.winfo_screenwidth() - r.winfo_width() - 40}+40")
+        r.geometry(f"+{r.winfo_screenwidth() - r.winfo_width() - 40}+40")
+        try:
+            wx, wy = (int(v) for v in self.settings["window"].lstrip("+").split("+"))
+            if 0 <= wx < r.winfo_screenwidth() - 50 and 0 <= wy < r.winfo_screenheight() - 50:
+                r.geometry(f"+{wx}+{wy}")  # 지난번 창 위치 (화면 안일 때만)
+        except ValueError:
+            pass
         self.refresh(f"감시 위치: 화면 가운데 ({self.x}, {self.y})")
 
     def refresh(self, message=None):
@@ -176,12 +180,23 @@ class App:
     # --- 단축키 ---
 
     def start_hotkeys(self):
-        self.hotkeys = keyboard.GlobalHotKeys(
-            {to_pynput(self.settings["hotkey"]): self.on_hotkey})
-        self.hotkeys.start()
+        # 글자가 아니라 키 자체로 비교해서 한글 입력 상태에서도 동작
+        mods, main_key = split_combo(self.settings["hotkey"])
+        held = set()
 
-    def on_hotkey(self):
-        self.toggle_pressed = True  # 키보드 스레드에서는 신호만 남김
+        def on_press(key):
+            name = key_name(key)
+            if not name or name in held:  # 꾹 누르고 있을 때 반복 입력 무시
+                return
+            held.add(name)
+            if name == main_key and held & set(MODIFIERS) == mods:
+                self.toggle_pressed = True  # 키보드 스레드에서는 신호만 남김
+
+        def on_release(key):
+            held.discard(key_name(key))
+
+        self.hotkeys = keyboard.Listener(on_press=on_press, on_release=on_release)
+        self.hotkeys.start()
 
     def begin_capture(self):
         """[단축키 설정] 버튼: 다음에 누르는 키 조합을 새 단축키로."""
@@ -228,12 +243,21 @@ class App:
             return
         self.watching = not self.watching
         if self.watching:
+            self.x, self.y = screen_center(self.sct)
             self.base = read_pixel(self.sct, self.x, self.y)  # 누른 순간의 색이 기준
             self.refresh(f"기준 색 RGB{self.base}")
         else:
             self.refresh("감시를 껐어요")
 
     def tick(self):
+        try:
+            self.check()
+        except Exception as e:  # 잠금 화면 등으로 화면을 못 읽어도 계속 동작
+            self.watching = False
+            self.refresh(f"오류로 감시를 껐어요: {e}")
+        self.root.after(TICK_MS, self.tick)
+
+    def check(self):
         if self.captured is not None:
             self.finish_capture()
         if self.toggle_pressed:
@@ -250,7 +274,6 @@ class App:
                                  f"RGB{self.base} → RGB{now}")
                 except pyautogui.FailSafeException:
                     self.refresh("마우스가 왼쪽 위 모서리에 있어서 클릭을 멈췄어요")
-        self.root.after(TICK_MS, self.tick)
 
     # --- 옵션 ---
 
