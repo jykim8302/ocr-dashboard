@@ -1,18 +1,17 @@
-"""단축키를 누르면, 그 순간 화면 가운데 1픽셀 색을 기억하고
-색이 바뀌면 그 자리를 딱 한 번 클릭한 뒤 감시를 끄는 프로그램.
-감시 중에 단축키를 다시 누르면 감시를 끄고, 꺼진 상태에서 누르면 다시 시작한다.
+"""화면 가운데 1픽셀 색이 바뀌면 딱 한 번 클릭하는 프로그램 (창 버전).
+
+- 단축키(기본 F8)를 누르면 그 순간 가운데 색을 기억하고 감시 시작
+- 색이 바뀌면 한 번 클릭하고 감시 꺼짐
+- 감시 중에 단축키를 또 누르면 클릭 없이 감시 꺼짐
+- [단축키 설정] 버튼으로 키를 바꾸고, 모든 설정은 자동 저장
 
 사용법:
-    python pixel_clicker.py           # 실행 (처음엔 단축키 설정부터)
-    python pixel_clicker.py --setup   # 단축키 다시 설정
-
-멈추기: 종료 단축키, Ctrl+C, 또는 마우스를 화면 왼쪽 위 모서리로 이동
+    python pixel_clicker.py
 """
 
-import argparse
 import json
-import threading
 import time
+import tkinter as tk
 from pathlib import Path
 
 import mss
@@ -20,8 +19,33 @@ import pyautogui
 from pynput import keyboard
 
 SETTINGS_FILE = Path(__file__).with_name("hotkey_settings.json")
+DEFAULTS = {"hotkey": "f8", "tolerance": 10, "button": "left", "window": ""}
 MODIFIERS = ["ctrl", "alt", "shift", "cmd"]
+TICK_MS = 10  # 몇 ms마다 픽셀을 검사할지
 
+
+# ---------- 설정 저장/불러오기 ----------
+
+def load_settings():
+    """저장된 설정을 읽는다. 없거나 깨졌으면 기본값."""
+    settings = dict(DEFAULTS)
+    try:
+        saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+        saved.setdefault("hotkey", saved.get("start_key"))  # 예전 버전 설정 이어받기
+        settings.update({k: saved[k] for k in DEFAULTS if saved.get(k) is not None})
+    except (OSError, ValueError):
+        pass
+    return settings
+
+
+def save_settings(settings):
+    try:
+        SETTINGS_FILE.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+# ---------- 키 처리 ----------
 
 def key_name(key):
     """눌린 키를 'ctrl', 'f8', 's' 같은 이름으로 바꾼다. 모르는 키는 None."""
@@ -39,10 +63,132 @@ def key_name(key):
     return None
 
 
-def capture_combo(prompt):
-    """사용자가 누른 키 조합을 받아 'ctrl+alt+s' 형태로 돌려준다."""
-    while True:
-        print(prompt)
+def make_combo(pressed):
+    """누른 키 목록을 'ctrl+alt+s' 형태로. 일반 키가 정확히 1개가 아니면 None."""
+    mods = [m for m in MODIFIERS if m in pressed]
+    others = [k for k in pressed if k not in MODIFIERS]
+    return "+".join(mods + others) if len(others) == 1 else None
+
+
+def to_pynput(combo):
+    """'ctrl+alt+s', 'f8'을 pynput 형식('<ctrl>+<alt>+s', '<f8>')으로 바꾼다."""
+    return "+".join(k if len(k) == 1 else f"<{k}>" for k in combo.split("+"))
+
+
+# ---------- 화면 처리 ----------
+
+def screen_center(sct):
+    """주 모니터의 가운데 좌표(x, y)."""
+    mon = sct.monitors[1]
+    return mon["left"] + mon["width"] // 2, mon["top"] + mon["height"] // 2
+
+
+def read_pixel(sct, x, y):
+    """(x, y) 위치 1픽셀의 색 (R, G, B)."""
+    return sct.grab({"left": x, "top": y, "width": 1, "height": 1}).pixel(0, 0)
+
+
+def is_changed(a, b, tolerance):
+    """두 색의 RGB 차이가 허용치보다 크면 True."""
+    return max(abs(a[i] - b[i]) for i in range(3)) > tolerance
+
+
+# ---------- 창 ----------
+
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.settings = load_settings()
+        self.sct = getattr(mss, "MSS", mss.mss)()  # 새 버전 mss는 MSS 이름 사용
+        self.x, self.y = screen_center(self.sct)
+        self.watching = False
+        self.base = None
+        self.clicks = 0
+        self.toggle_pressed = False  # 단축키 신호 (키보드 스레드 -> 창)
+        self.hotkeys = None
+        self.capturing = None        # 단축키 입력 중일 때의 키보드 리스너
+        self.captured = None         # 입력 결과: 조합 문자열 또는 "" (잘못된 입력)
+
+        pyautogui.FAILSAFE = True    # 마우스를 왼쪽 위 모서리로 옮기면 클릭 안 함
+        pyautogui.PAUSE = 0
+
+        self.build_ui()
+        self.start_hotkeys()
+        root.protocol("WM_DELETE_WINDOW", self.close)
+        root.after(TICK_MS, self.tick)
+
+    def build_ui(self):
+        r = self.root
+        r.title("픽셀 클릭기")
+        r.resizable(False, False)
+        r.attributes("-topmost", True)  # 항상 위에 (화면 가운데는 가리지 않게 오른쪽 위에 배치)
+        pad = {"padx": 10, "pady": 4}
+
+        self.status = tk.Label(r, font=("맑은 고딕", 16, "bold"), width=16)
+        self.status.grid(row=0, column=0, columnspan=3, **pad)
+
+        self.toggle_btn = tk.Button(r, text="감시 켜기 / 끄기", command=self.toggle, height=2)
+        self.toggle_btn.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
+
+        tk.Label(r, text="단축키").grid(row=2, column=0, sticky="w", **pad)
+        self.key_label = tk.Label(r, font=("맑은 고딕", 11, "bold"))
+        self.key_label.grid(row=2, column=1, sticky="w")
+        self.key_btn = tk.Button(r, text="단축키 설정", command=self.begin_capture)
+        self.key_btn.grid(row=2, column=2, sticky="e", **pad)
+
+        tk.Label(r, text="색 차이 허용치").grid(row=3, column=0, sticky="w", **pad)
+        self.tol = tk.IntVar(value=self.settings["tolerance"])
+        tk.Spinbox(r, from_=0, to=255, width=5, textvariable=self.tol,
+                   command=self.save_options).grid(row=3, column=1, sticky="w")
+        self.tol.trace_add("write", lambda *_: self.save_options())
+
+        tk.Label(r, text="클릭 버튼").grid(row=4, column=0, sticky="w", **pad)
+        self.button = tk.StringVar(value=self.settings["button"])
+        box = tk.Frame(r)
+        box.grid(row=4, column=1, columnspan=2, sticky="w")
+        tk.Radiobutton(box, text="왼쪽", value="left", variable=self.button,
+                       command=self.save_options).pack(side="left")
+        tk.Radiobutton(box, text="오른쪽", value="right", variable=self.button,
+                       command=self.save_options).pack(side="left")
+
+        self.log = tk.Label(r, fg="gray", anchor="w", justify="left")
+        self.log.grid(row=5, column=0, columnspan=3, sticky="ew", **pad)
+
+        r.update_idletasks()
+        if self.settings["window"]:
+            r.geometry(self.settings["window"])  # 지난번 창 위치
+        else:
+            r.geometry(f"+{r.winfo_screenwidth() - r.winfo_width() - 40}+40")
+        self.refresh(f"감시 위치: 화면 가운데 ({self.x}, {self.y})")
+
+    def refresh(self, message=None):
+        key = self.settings["hotkey"].upper()
+        self.key_label.config(text=key)
+        if self.capturing:
+            self.status.config(text="키를 누르세요...", fg="#d97706")
+        elif self.watching:
+            self.status.config(text="● 감시 중", fg="#16a34a")
+        else:
+            self.status.config(text="○ 꺼짐", fg="#6b7280")
+        if message:
+            self.log.config(text=message)
+
+    # --- 단축키 ---
+
+    def start_hotkeys(self):
+        self.hotkeys = keyboard.GlobalHotKeys(
+            {to_pynput(self.settings["hotkey"]): self.on_hotkey})
+        self.hotkeys.start()
+
+    def on_hotkey(self):
+        self.toggle_pressed = True  # 키보드 스레드에서는 신호만 남김
+
+    def begin_capture(self):
+        """[단축키 설정] 버튼: 다음에 누르는 키 조합을 새 단축키로."""
+        if self.capturing:
+            return
+        self.hotkeys.stop()
+        self.watching = False
         pressed, held = [], set()
 
         def on_press(key):
@@ -54,134 +200,84 @@ def capture_combo(prompt):
 
         def on_release(key):
             held.discard(key_name(key))
-            if pressed and not held:
-                return False  # 모든 키를 떼면 입력 끝
+            if pressed and not held:  # 모든 키를 떼면 입력 끝
+                self.captured = make_combo(pressed) or ""
+                return False
 
-        with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-            listener.join()
+        self.capturing = keyboard.Listener(on_press=on_press, on_release=on_release)
+        self.capturing.start()
+        self.key_btn.config(state="disabled")
+        self.refresh("원하는 키를 누르세요 (예: F8, Ctrl+Alt+S)")
 
-        mods = [m for m in MODIFIERS if m in pressed]
-        others = [k for k in pressed if k not in MODIFIERS]
-        if len(others) == 1:
-            combo = "+".join(mods + others)
-            print(f"  -> {combo.upper()}")
-            return combo
-        print("  Ctrl/Alt/Shift 말고 다른 키를 1개 포함해서 눌러 주세요.")
+    def finish_capture(self):
+        combo, self.captured, self.capturing = self.captured, None, None
+        self.key_btn.config(state="normal")
+        if combo:
+            self.settings["hotkey"] = combo
+            save_settings(self.settings)
+            message = f"단축키가 {combo.upper()}(으)로 저장됐어요"
+        else:
+            message = "Ctrl/Alt/Shift 말고 다른 키를 1개 포함해서 눌러 주세요"
+        self.start_hotkeys()
+        self.refresh(message)
 
+    # --- 감시 ---
 
-def setup_hotkeys():
-    """단축키를 직접 눌러서 정하고 파일에 저장한다."""
-    print("=== 단축키 설정 ===")
-    start = capture_combo("감시 켜기/끄기에 쓸 키를 누르세요 (예: F8, Ctrl+Alt+S)")
-    while True:
-        quit_ = capture_combo("프로그램 종료에 쓸 키를 누르세요 (예: F12)")
-        if quit_ != start:
-            break
-        print("  시작 키와 다른 키로 정해 주세요.")
-    settings = {"start_key": start, "quit_key": quit_}
-    SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
-    print("저장 완료!\n")
-    return settings
+    def toggle(self):
+        if self.capturing:
+            return
+        self.watching = not self.watching
+        if self.watching:
+            self.base = read_pixel(self.sct, self.x, self.y)  # 누른 순간의 색이 기준
+            self.refresh(f"기준 색 RGB{self.base}")
+        else:
+            self.refresh("감시를 껐어요")
 
+    def tick(self):
+        if self.captured is not None:
+            self.finish_capture()
+        if self.toggle_pressed:
+            self.toggle_pressed = False
+            self.toggle()
+        if self.watching:
+            now = read_pixel(self.sct, self.x, self.y)
+            if is_changed(self.base, now, self.safe_tolerance()):
+                self.watching = False  # 한 번 클릭하면 감시 끄기
+                try:
+                    pyautogui.click(self.x, self.y, button=self.settings["button"])
+                    self.clicks += 1
+                    self.refresh(f"{time.strftime('%H:%M:%S')} 클릭! (총 {self.clicks}회)\n"
+                                 f"RGB{self.base} → RGB{now}")
+                except pyautogui.FailSafeException:
+                    self.refresh("마우스가 왼쪽 위 모서리에 있어서 클릭을 멈췄어요")
+        self.root.after(TICK_MS, self.tick)
 
-def load_hotkeys():
-    """저장된 단축키를 읽는다. 없으면 설정부터 한다."""
-    try:
-        settings = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        if settings.get("start_key") and settings.get("quit_key"):
-            return settings
-    except (OSError, ValueError):
-        pass
-    return setup_hotkeys()
+    # --- 옵션 ---
 
+    def safe_tolerance(self):
+        try:
+            return max(0, min(255, int(self.tol.get())))
+        except (tk.TclError, ValueError):
+            return self.settings["tolerance"]
 
-def to_pynput(combo):
-    """'ctrl+alt+s', 'f8' 같은 입력을 pynput 형식('<ctrl>+<alt>+s', '<f8>')으로 바꾼다."""
-    keys = []
-    for k in combo.lower().replace(" ", "").split("+"):
-        keys.append(k if len(k) == 1 or k.startswith("<") else f"<{k}>")
-    return "+".join(keys)
+    def save_options(self):
+        self.settings["tolerance"] = self.safe_tolerance()
+        self.settings["button"] = self.button.get()
+        save_settings(self.settings)
 
-
-def screen_center(sct):
-    """주 모니터의 가운데 좌표(x, y)를 돌려준다."""
-    mon = sct.monitors[1]
-    return mon["left"] + mon["width"] // 2, mon["top"] + mon["height"] // 2
-
-
-def read_pixel(sct, x, y):
-    """(x, y) 위치 1픽셀의 색을 (R, G, B)로 돌려준다."""
-    shot = sct.grab({"left": x, "top": y, "width": 1, "height": 1})
-    return shot.pixel(0, 0)
-
-
-def is_changed(a, b, tolerance):
-    """두 색의 RGB 차이가 허용치보다 크면 True."""
-    return max(abs(a[i] - b[i]) for i in range(3)) > tolerance
+    def close(self):
+        self.settings["window"] = f"+{self.root.winfo_x()}+{self.root.winfo_y()}"
+        self.save_options()
+        self.hotkeys.stop()
+        if self.capturing:
+            self.capturing.stop()
+        self.root.destroy()
 
 
 def main():
-    p = argparse.ArgumentParser(description="단축키를 누르면 화면 가운데 픽셀 색이 바뀔 때 클릭")
-    p.add_argument("--setup", action="store_true", help="단축키 다시 설정")
-    p.add_argument("--tolerance", type=int, default=10, help="색 차이 허용치 0~255 (기본 10)")
-    p.add_argument("--interval", type=float, default=0.01, help="검사 간격 초 (기본 0.01)")
-    p.add_argument("--button", choices=["left", "right"], default="left", help="클릭 버튼")
-    args = p.parse_args()
-
-    settings = setup_hotkeys() if args.setup else load_hotkeys()
-    start_key, quit_key = settings["start_key"], settings["quit_key"]
-
-    pyautogui.FAILSAFE = True  # 마우스를 왼쪽 위 모서리로 옮기면 즉시 멈춤
-    pyautogui.PAUSE = 0
-
-    start = threading.Event()  # 켜기/끄기 단축키가 눌렸다는 신호
-    quit_ = threading.Event()
-    hotkeys = keyboard.GlobalHotKeys({
-        to_pynput(start_key): start.set,
-        to_pynput(quit_key): quit_.set,
-    })
-    hotkeys.start()
-
-    watching = False
-    base = None
-    clicks = 0
-
-    with mss.mss() as sct:
-        x, y = screen_center(sct)
-        print(f"감시 위치: ({x}, {y})")
-        print(f"[{start_key.upper()}] 감시 켜기/끄기   [{quit_key.upper()}] 프로그램 종료")
-        print("(단축키를 바꾸려면 '단축키_바꾸기.bat' 실행)")
-        print("대기 중...")
-
-        try:
-            while not quit_.is_set():
-                if start.is_set():
-                    start.clear()
-                    watching = not watching
-                    if watching:
-                        base = read_pixel(sct, x, y)  # 누른 순간의 색을 기준으로
-                        print(f"감시 시작! 기준 색 RGB{base}")
-                    else:
-                        print(f"감시 꺼짐. [{start_key.upper()}]를 누르면 다시 시작")
-
-                if watching:
-                    now = read_pixel(sct, x, y)
-                    if is_changed(base, now, args.tolerance):
-                        pyautogui.click(x, y, button=args.button)
-                        clicks += 1
-                        print(f"[{time.strftime('%H:%M:%S')}] 색 변경 RGB{base} -> RGB{now}  클릭! (총 {clicks}회)")
-                        watching = False  # 한 번 클릭하면 감시 끄기
-                        print(f"감시 꺼짐. [{start_key.upper()}]를 누르면 다시 시작")
-
-                time.sleep(args.interval)
-        except KeyboardInterrupt:
-            pass
-        except pyautogui.FailSafeException:
-            print("마우스가 모서리로 이동해서 멈췄습니다.")
-        finally:
-            hotkeys.stop()
-
-    print(f"종료. 총 {clicks}회 클릭했습니다.")
+    root = tk.Tk()
+    App(root)
+    root.mainloop()
 
 
 if __name__ == "__main__":
