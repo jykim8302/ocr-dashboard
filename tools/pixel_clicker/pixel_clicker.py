@@ -1,6 +1,6 @@
 """단축키를 누르면, 그 순간 화면 가운데 1픽셀 색을 기억하고
 색이 바뀌면 그 자리를 딱 한 번 클릭한 뒤 감시를 끄는 프로그램.
-단축키를 다시 누르면 다시 감시를 시작한다.
+감시 중에 단축키를 다시 누르면 감시를 끄고, 꺼진 상태에서 누르면 다시 시작한다.
 
 사용법:
     python pixel_clicker.py           # 실행 (처음엔 단축키 설정부터)
@@ -72,7 +72,7 @@ def capture_combo(prompt):
 def setup_hotkeys():
     """단축키를 직접 눌러서 정하고 파일에 저장한다."""
     print("=== 단축키 설정 ===")
-    start = capture_combo("감시 시작에 쓸 키를 누르세요 (예: F8, Ctrl+Alt+S)")
+    start = capture_combo("감시 켜기/끄기에 쓸 키를 누르세요 (예: F8, Ctrl+Alt+S)")
     while True:
         quit_ = capture_combo("프로그램 종료에 쓸 키를 누르세요 (예: F12)")
         if quit_ != start:
@@ -134,7 +134,7 @@ def main():
     pyautogui.FAILSAFE = True  # 마우스를 왼쪽 위 모서리로 옮기면 즉시 멈춤
     pyautogui.PAUSE = 0
 
-    start = threading.Event()  # 시작 단축키가 눌렸다는 신호
+    start = threading.Event()  # 켜기/끄기 단축키가 눌렸다는 신호
     quit_ = threading.Event()
     hotkeys = keyboard.GlobalHotKeys({
         to_pynput(start_key): start.set,
@@ -149,7 +149,7 @@ def main():
     with mss.mss() as sct:
         x, y = screen_center(sct)
         print(f"감시 위치: ({x}, {y})")
-        print(f"[{start_key.upper()}] 감시 시작   [{quit_key.upper()}] 종료")
+        print(f"[{start_key.upper()}] 감시 켜기/끄기   [{quit_key.upper()}] 프로그램 종료")
         print("(단축키를 바꾸려면 '단축키_바꾸기.bat' 실행)")
         print("대기 중...")
 
@@ -157,9 +157,12 @@ def main():
             while not quit_.is_set():
                 if start.is_set():
                     start.clear()
-                    watching = True
-                    base = read_pixel(sct, x, y)  # 누른 순간의 색을 기준으로
-                    print(f"감시 시작! 기준 색 RGB{base}")
+                    watching = not watching
+                    if watching:
+                        base = read_pixel(sct, x, y)  # 누른 순간의 색을 기준으로
+                        print(f"감시 시작! 기준 색 RGB{base}")
+                    else:
+                        print(f"감시 꺼짐. [{start_key.upper()}]를 누르면 다시 시작")
 
                 if watching:
                     now = read_pixel(sct, x, y)
