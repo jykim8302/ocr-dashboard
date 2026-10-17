@@ -10,3 +10,5 @@ final_output.zip
 .ipynb_checkpoints/
 *.log
 .gemini/
+
+tools/pixel_clicker/hotkey_settings.json
