@@ -43,8 +43,20 @@ target.attributes("-topmost", True)
 target.geometry(f"300x300+{app.x - 150}+{app.y - 150}")
 canvas = tk.Canvas(target, bg="blue", highlightthickness=0)
 canvas.pack(fill="both", expand=True)
-canvas.bind("<ButtonPress-1>", lambda e: clicks.append(e.time))  # e.time: OS가 기록한 입력 시각(ms)
-canvas.bind("<ButtonRelease-1>", lambda e: press_times.append((e.time - clicks[-1]) / 1000))
+canvas.bind("<Button-1>", lambda e: clicks.append(time.time()))
+
+# 버튼 누름 시간은 시스템 마우스 기록으로 잰다 (창은 클릭 중에 이벤트를 몰아서 처리하므로)
+_down = [0.0]
+
+
+def on_mouse(x, y, button, pressed):
+    if pressed:
+        _down[0] = time.perf_counter()
+    else:
+        press_times.append(time.perf_counter() - _down[0])
+
+
+mouse.Listener(on_click=on_mouse).start()
 
 # 테스트 스레드 -> 창(메인 스레드)에 일 시키기
 jobs = queue.Queue()
@@ -77,7 +89,7 @@ def check(name, ok):
 
 
 def shot(name):
-    with mss.mss() as s:
+    with getattr(mss, "MSS", mss.mss)() as s:
         img = s.grab(s.monitors[1])
         mss.tools.to_png(img.rgb, img.size, output=str(OUT / f"{name}.png"))
 
