@@ -23,10 +23,9 @@ import pyautogui
 from pynput import keyboard
 
 SETTINGS_FILE = Path(__file__).with_name("hotkey_settings.json")
-DEFAULTS = {"hotkey": "f8", "mode": "hold", "tolerance": 10, "button": "left", "window": ""}
+DEFAULTS = {"hotkey": "f8", "mode": "hold", "tolerance": 10, "button": "left", "hold_ms": 100, "window": ""}
 MODIFIERS = ["ctrl", "alt", "shift", "cmd"]
-TICK_MS = 10        # 몇 ms마다 픽셀을 검사할지
-CLICK_HOLD = 0.05   # 클릭할 때 버튼을 누르고 있는 시간(초). 너무 짧으면 게임 등이 무시함
+TICK_MS = 10  # 몇 ms마다 픽셀을 검사할지
 IS_WINDOWS = sys.platform == "win32"
 
 
@@ -100,6 +99,50 @@ def split_combo(combo):
     """'ctrl+alt+s' -> ({'ctrl', 'alt'}, 's')"""
     keys = combo.split("+")
     return {k for k in keys if k in MODIFIERS}, next(k for k in keys if k not in MODIFIERS)
+
+
+# ---------- 클릭 ----------
+
+if IS_WINDOWS:
+    from ctypes import wintypes
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG), ("mouseData", wintypes.DWORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.c_size_t)]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("mi", MOUSEINPUT)]
+
+    def send_mouse(flags, dx=0, dy=0):
+        """Windows SendInput으로 마우스 입력 1개 보내기 (게임이 읽는 방식과 같은 경로)."""
+        inp = INPUT(type=0, mi=MOUSEINPUT(dx, dy, 0, flags, 0, 0))
+        if ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+            raise ctypes.WinError()
+
+
+MOVE, LEFT_DOWN, LEFT_UP, RIGHT_DOWN, RIGHT_UP = 0x1, 0x2, 0x4, 0x8, 0x10
+
+
+def game_click(x, y, button, hold):
+    """게임에서도 잘 먹히는 클릭.
+    1) 커서를 (x, y)로  2) 살짝 움직였다 되돌림 (움직임이 있어야 반응하는 게임용)
+    3) 버튼을 hold초 동안 누르고 있다가 뗌 (프레임마다 확인하는 게임이 놓치지 않게)
+    """
+    pyautogui.failSafeCheck()  # 마우스가 왼쪽 위 모서리면 멈춤
+    if not IS_WINDOWS:
+        pyautogui.moveTo(x, y)
+        pyautogui.mouseDown(button=button)
+        time.sleep(hold)
+        pyautogui.mouseUp(button=button)
+        return
+    down, up = (LEFT_DOWN, LEFT_UP) if button == "left" else (RIGHT_DOWN, RIGHT_UP)
+    ctypes.windll.user32.SetCursorPos(x, y)
+    send_mouse(MOVE, 1, 0)
+    send_mouse(MOVE, -1, 0)
+    send_mouse(down)
+    time.sleep(hold)
+    send_mouse(up)
 
 
 # ---------- 화면 처리 ----------
@@ -188,14 +231,23 @@ class App:
         tk.Radiobutton(box, text="오른쪽", value="right", variable=self.button,
                        command=self.save_options).pack(side="left")
 
+        tk.Label(r, text="클릭 누름 시간").grid(row=6, column=0, sticky="w", **pad)
+        self.hold_ms = tk.IntVar(value=self.settings["hold_ms"])
+        box = tk.Frame(r)
+        box.grid(row=6, column=1, columnspan=2, sticky="w")
+        tk.Spinbox(box, from_=10, to=1000, increment=10, width=5, textvariable=self.hold_ms,
+                   command=self.save_options).pack(side="left")
+        tk.Label(box, text="ms (게임이 클릭을 놓치면 늘리기)", fg="gray").pack(side="left")
+        self.hold_ms.trace_add("write", lambda *_: self.save_options())
+
         if not is_admin():
             tk.Label(r, text="게임 등에서 클릭이 안 되면 →", fg="#b45309").grid(
-                row=6, column=0, columnspan=2, sticky="w", **pad)
+                row=7, column=0, columnspan=2, sticky="w", **pad)
             tk.Button(r, text="관리자로 다시 실행", command=self.restart_as_admin).grid(
-                row=6, column=2, sticky="e", **pad)
+                row=7, column=2, sticky="e", **pad)
 
         self.log = tk.Label(r, fg="gray", anchor="w", justify="left")
-        self.log.grid(row=7, column=0, columnspan=3, sticky="ew", **pad)
+        self.log.grid(row=8, column=0, columnspan=3, sticky="ew", **pad)
 
         r.update_idletasks()
         r.geometry(f"+{r.winfo_screenwidth() - r.winfo_width() - 40}+40")
@@ -314,12 +366,7 @@ class App:
         self.refresh(message)
 
     def click(self):
-        """버튼을 잠깐 누르고 있다가 떼는 클릭 (너무 빠른 클릭은 무시하는 프로그램이 있음)."""
-        button = self.settings["button"]
-        pyautogui.moveTo(self.x, self.y)
-        pyautogui.mouseDown(button=button)
-        time.sleep(CLICK_HOLD)
-        pyautogui.mouseUp(button=button)
+        game_click(self.x, self.y, self.settings["button"], self.safe_hold_ms() / 1000)
 
     def tick(self):
         try:
@@ -354,8 +401,15 @@ class App:
         except (tk.TclError, ValueError):
             return self.settings["tolerance"]
 
+    def safe_hold_ms(self):
+        try:
+            return max(10, min(1000, int(self.hold_ms.get())))
+        except (tk.TclError, ValueError):
+            return self.settings["hold_ms"]
+
     def save_options(self):
         self.settings["tolerance"] = self.safe_tolerance()
+        self.settings["hold_ms"] = self.safe_hold_ms()
         self.settings["button"] = self.button.get()
         self.settings["mode"] = self.mode.get()
         save_settings(self.settings)

@@ -135,7 +135,7 @@ def scenario():
         set_color("orange")
         check("누른 채 색 바뀜 -> 클릭", len(clicks) == 1)
         check(f"버튼 누름 시간 충분 ({press_times[-1] * 1000:.0f}ms)" if press_times else "버튼 누름 시간 기록 없음",
-              bool(press_times) and press_times[-1] >= 0.03)
+              bool(press_times) and press_times[-1] >= 0.08)  # 기본 100ms
         check("클릭 후 감시 꺼짐 (누르고 있어도)", not app.watching)
         kb.release(K.f8)
         time.sleep(0.5)
