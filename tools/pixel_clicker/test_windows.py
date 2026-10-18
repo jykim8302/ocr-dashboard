@@ -194,6 +194,25 @@ def scenario():
         check("색 바뀜 -> 또 클릭", len(clicks) == 3)
         shot("4_clicked")
 
+        if sys.platform == "win32":
+            # 사용자 PC에서 난 [WinError 87]을 일부러 일으켜서, 기본 방식으로 대신 클릭하는지 확인
+            import ctypes
+            original = pc.send_mouse
+
+            def broken(*args, **kwargs):
+                raise ctypes.WinError(87)
+
+            pc.send_mouse = broken
+            with kb.pressed(K.ctrl, K.alt):
+                tap("s", 0.1)
+            time.sleep(0.6)
+            set_color("white")
+            pc.send_mouse = original
+            log = ui(lambda: app.log.cget("text"))
+            check("WinError 87이어도 기본 방식으로 클릭됨", len(clicks) == 4)
+            check(f"오류 안내 표시 ({log!r})", "87" in log)
+            shot("5_fallback")
+
         closed.append(True)
         ui(app.close)  # 창 닫기 (위치 저장 확인은 아래 메인 스레드에서)
     except Exception as e:

@@ -114,35 +114,60 @@ if IS_WINDOWS:
     class INPUT(ctypes.Structure):
         _fields_ = [("type", wintypes.DWORD), ("mi", MOUSEINPUT)]
 
+    # 다른 라이브러리(pynput)가 공용 SendInput 설정을 바꾸므로 따로 불러서 씀
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _send_input = _user32.SendInput
+    _send_input.argtypes = (wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int)
+    _send_input.restype = wintypes.UINT
+
     def send_mouse(flags, dx=0, dy=0):
         """Windows SendInput으로 마우스 입력 1개 보내기 (게임이 읽는 방식과 같은 경로)."""
         inp = INPUT(type=0, mi=MOUSEINPUT(dx, dy, 0, flags, 0, 0))
-        if ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
-            raise ctypes.WinError()
+        if _send_input(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+            raise ctypes.WinError(ctypes.get_last_error())
 
 
 MOVE, LEFT_DOWN, LEFT_UP, RIGHT_DOWN, RIGHT_UP = 0x1, 0x2, 0x4, 0x8, 0x10
+
+
+def basic_click(x, y, button, hold):
+    pyautogui.moveTo(x, y)
+    pyautogui.mouseDown(button=button)
+    time.sleep(hold)
+    pyautogui.mouseUp(button=button)
 
 
 def game_click(x, y, button, hold):
     """게임에서도 잘 먹히는 클릭.
     1) 커서를 (x, y)로  2) 살짝 움직였다 되돌림 (움직임이 있어야 반응하는 게임용)
     3) 버튼을 hold초 동안 누르고 있다가 뗌 (프레임마다 확인하는 게임이 놓치지 않게)
+    SendInput이 거절되면 기본 방식으로 클릭하고, 원인 안내 문구를 돌려준다.
     """
     pyautogui.failSafeCheck()  # 마우스가 왼쪽 위 모서리면 멈춤
     if not IS_WINDOWS:
-        pyautogui.moveTo(x, y)
-        pyautogui.mouseDown(button=button)
-        time.sleep(hold)
-        pyautogui.mouseUp(button=button)
-        return
+        basic_click(x, y, button, hold)
+        return None
     down, up = (LEFT_DOWN, LEFT_UP) if button == "left" else (RIGHT_DOWN, RIGHT_UP)
-    ctypes.windll.user32.SetCursorPos(x, y)
-    send_mouse(MOVE, 1, 0)
-    send_mouse(MOVE, -1, 0)
-    send_mouse(down)
-    time.sleep(hold)
-    send_mouse(up)
+    pressed = False
+    try:
+        ctypes.windll.user32.SetCursorPos(x, y)
+        send_mouse(MOVE, 1, 0)
+        send_mouse(MOVE, -1, 0)
+        send_mouse(down)
+        pressed = True
+        time.sleep(hold)
+        send_mouse(up)
+        return None
+    except OSError as e:
+        bits = ctypes.sizeof(ctypes.c_void_p) * 8
+        print(f"SendInput 실패: {e} (INPUT {ctypes.sizeof(INPUT)}바이트, {bits}비트 파이썬)", flush=True)
+        if pressed:
+            pyautogui.mouseUp(button=button)
+        else:
+            basic_click(x, y, button, hold)
+        if not is_admin():
+            return f"게임용 클릭이 거절됐어요(오류 {e.winerror})\n→ [관리자로 다시 실행]을 눌러 보세요"
+        return f"게임용 클릭 실패(오류 {e.winerror}) → 기본 방식으로 클릭했어요"
 
 
 # ---------- 화면 처리 ----------
@@ -366,7 +391,8 @@ class App:
         self.refresh(message)
 
     def click(self):
-        game_click(self.x, self.y, self.settings["button"], self.safe_hold_ms() / 1000)
+        """클릭하고, 문제가 있었으면 안내 문구를 돌려준다."""
+        return game_click(self.x, self.y, self.settings["button"], self.safe_hold_ms() / 1000)
 
     def tick(self):
         try:
@@ -386,10 +412,10 @@ class App:
             if is_changed(self.base, now, self.safe_tolerance()):
                 self.watching = False  # 한 번 클릭하면 감시 끄기
                 try:
-                    self.click()
+                    note = self.click()
                     self.clicks += 1
                     self.refresh(f"{time.strftime('%H:%M:%S')} 클릭! (총 {self.clicks}회)\n"
-                                 f"RGB{self.base} → RGB{now}")
+                                 + (note or f"RGB{self.base} → RGB{now}"))
                 except pyautogui.FailSafeException:
                     self.refresh("마우스가 왼쪽 위 모서리에 있어서 클릭을 멈췄어요")
 
