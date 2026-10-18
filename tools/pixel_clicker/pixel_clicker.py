@@ -1,16 +1,20 @@
 """화면 가운데 1픽셀 색이 바뀌면 딱 한 번 클릭하는 프로그램 (창 버전).
 
-- 단축키(기본 F8)를 누르면 그 순간 가운데 색을 기억하고 감시 시작
-- 색이 바뀌면 한 번 클릭하고 감시 꺼짐
-- 감시 중에 단축키를 또 누르면 클릭 없이 감시 꺼짐
-- [단축키 설정] 버튼으로 키를 바꾸고, 모든 설정은 자동 저장
+단축키 방식 2가지 (창에서 선택):
+- 누르고 있는 동안: 단축키를 누르고 있는 동안만 감시, 떼면 꺼짐
+- 누를 때마다 켜기/끄기: 한 번 누르면 켜지고, 또 누르면 꺼짐
+어느 방식이든 색이 바뀌면 한 번 클릭하고 감시가 꺼진다.
+[단축키 설정] 버튼으로 키를 바꾸고, 모든 설정은 자동 저장.
 
 사용법:
     python pixel_clicker.py
 """
 
+import ctypes
 import json
+import sys
 import time
+from collections import deque
 import tkinter as tk
 from pathlib import Path
 
@@ -19,9 +23,31 @@ import pyautogui
 from pynput import keyboard
 
 SETTINGS_FILE = Path(__file__).with_name("hotkey_settings.json")
-DEFAULTS = {"hotkey": "f8", "tolerance": 10, "button": "left", "window": ""}
+DEFAULTS = {"hotkey": "f8", "mode": "hold", "tolerance": 10, "button": "left", "window": ""}
 MODIFIERS = ["ctrl", "alt", "shift", "cmd"]
-TICK_MS = 10  # 몇 ms마다 픽셀을 검사할지
+TICK_MS = 10        # 몇 ms마다 픽셀을 검사할지
+CLICK_HOLD = 0.05   # 클릭할 때 버튼을 누르고 있는 시간(초). 너무 짧으면 게임 등이 무시함
+IS_WINDOWS = sys.platform == "win32"
+
+
+# ---------- 관리자 권한 (Windows) ----------
+# 관리자 권한으로 실행된 프로그램(게임 등)에는 일반 프로그램의 클릭/키 입력이 전달되지 않는다.
+
+def is_admin():
+    if not IS_WINDOWS:
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return True
+
+
+def relaunch_as_admin():
+    """관리자 권한으로 다시 실행 (UAC 확인 창이 뜸). 성공하면 True."""
+    script = Path(__file__).resolve()
+    rc = ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, f'"{script}"', str(script.parent), 1)
+    return rc > 32
 
 
 # ---------- 설정 저장/불러오기 ----------
@@ -105,7 +131,7 @@ class App:
         self.watching = False
         self.base = None
         self.clicks = 0
-        self.toggle_pressed = False  # 단축키 신호 (키보드 스레드 -> 창)
+        self.key_events = deque()    # 단축키 신호 "down"/"up" (키보드 스레드 -> 창)
         self.hotkeys = None
         self.capturing = None        # 단축키 입력 중일 때의 키보드 리스너
         self.captured = None         # 입력 결과: 조합 문자열 또는 "" (잘못된 입력)
@@ -129,6 +155,7 @@ class App:
         self.status.grid(row=0, column=0, columnspan=3, **pad)
 
         self.toggle_btn = tk.Button(r, text="감시 켜기 / 끄기", command=self.toggle, height=2)
+        self.toggle_btn.bind("<space>", lambda e: "break")  # 스페이스로 눌리지 않게
         self.toggle_btn.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
 
         tk.Label(r, text="단축키").grid(row=2, column=0, sticky="w", **pad)
@@ -137,23 +164,38 @@ class App:
         self.key_btn = tk.Button(r, text="단축키 설정", command=self.begin_capture)
         self.key_btn.grid(row=2, column=2, sticky="e", **pad)
 
-        tk.Label(r, text="색 차이 허용치").grid(row=3, column=0, sticky="w", **pad)
+        tk.Label(r, text="단축키 방식").grid(row=3, column=0, sticky="nw", **pad)
+        self.mode = tk.StringVar(value=self.settings["mode"])
+        box = tk.Frame(r)
+        box.grid(row=3, column=1, columnspan=2, sticky="w")
+        tk.Radiobutton(box, text="누르고 있는 동안", value="hold", variable=self.mode,
+                       command=self.save_options).pack(anchor="w")
+        tk.Radiobutton(box, text="누를 때마다 켜기/끄기", value="toggle", variable=self.mode,
+                       command=self.save_options).pack(anchor="w")
+
+        tk.Label(r, text="색 차이 허용치").grid(row=4, column=0, sticky="w", **pad)
         self.tol = tk.IntVar(value=self.settings["tolerance"])
         tk.Spinbox(r, from_=0, to=255, width=5, textvariable=self.tol,
-                   command=self.save_options).grid(row=3, column=1, sticky="w")
+                   command=self.save_options).grid(row=4, column=1, sticky="w")
         self.tol.trace_add("write", lambda *_: self.save_options())
 
-        tk.Label(r, text="클릭 버튼").grid(row=4, column=0, sticky="w", **pad)
+        tk.Label(r, text="클릭 버튼").grid(row=5, column=0, sticky="w", **pad)
         self.button = tk.StringVar(value=self.settings["button"])
         box = tk.Frame(r)
-        box.grid(row=4, column=1, columnspan=2, sticky="w")
+        box.grid(row=5, column=1, columnspan=2, sticky="w")
         tk.Radiobutton(box, text="왼쪽", value="left", variable=self.button,
                        command=self.save_options).pack(side="left")
         tk.Radiobutton(box, text="오른쪽", value="right", variable=self.button,
                        command=self.save_options).pack(side="left")
 
+        if not is_admin():
+            tk.Label(r, text="게임 등에서 클릭이 안 되면 →", fg="#b45309").grid(
+                row=6, column=0, columnspan=2, sticky="w", **pad)
+            tk.Button(r, text="관리자로 다시 실행", command=self.restart_as_admin).grid(
+                row=6, column=2, sticky="e", **pad)
+
         self.log = tk.Label(r, fg="gray", anchor="w", justify="left")
-        self.log.grid(row=5, column=0, columnspan=3, sticky="ew", **pad)
+        self.log.grid(row=7, column=0, columnspan=3, sticky="ew", **pad)
 
         r.update_idletasks()
         r.geometry(f"+{r.winfo_screenwidth() - r.winfo_width() - 40}+40")
@@ -183,6 +225,7 @@ class App:
         # 글자가 아니라 키 자체로 비교해서 한글 입력 상태에서도 동작
         mods, main_key = split_combo(self.settings["hotkey"])
         held = set()
+        active = [False]  # 단축키가 눌려 있는 중인지
 
         def on_press(key):
             name = key_name(key)
@@ -190,10 +233,15 @@ class App:
                 return
             held.add(name)
             if name == main_key and held & set(MODIFIERS) == mods:
-                self.toggle_pressed = True  # 키보드 스레드에서는 신호만 남김
+                active[0] = True
+                self.key_events.append("down")  # 키보드 스레드에서는 신호만 남김
 
         def on_release(key):
-            held.discard(key_name(key))
+            name = key_name(key)
+            held.discard(name)
+            if active[0] and (name == main_key or name in mods):
+                active[0] = False
+                self.key_events.append("up")
 
         self.hotkeys = keyboard.Listener(on_press=on_press, on_release=on_release)
         self.hotkeys.start()
@@ -238,16 +286,40 @@ class App:
 
     # --- 감시 ---
 
-    def toggle(self):
+    def on_key(self, event):
         if self.capturing:
             return
-        self.watching = not self.watching
+        if self.mode.get() == "hold":
+            if event == "down":
+                self.start_watch()
+            elif self.watching:
+                self.stop_watch("키를 떼서 감시를 껐어요")
+        elif event == "down":
+            self.toggle()
+
+    def toggle(self):
         if self.watching:
-            self.x, self.y = screen_center(self.sct)
-            self.base = read_pixel(self.sct, self.x, self.y)  # 누른 순간의 색이 기준
-            self.refresh(f"기준 색 RGB{self.base}")
-        else:
-            self.refresh("감시를 껐어요")
+            self.stop_watch("감시를 껐어요")
+        elif not self.capturing:
+            self.start_watch()
+
+    def start_watch(self):
+        self.watching = True
+        self.x, self.y = screen_center(self.sct)
+        self.base = read_pixel(self.sct, self.x, self.y)  # 누른 순간의 색이 기준
+        self.refresh(f"기준 색 RGB{self.base}")
+
+    def stop_watch(self, message):
+        self.watching = False
+        self.refresh(message)
+
+    def click(self):
+        """버튼을 잠깐 누르고 있다가 떼는 클릭 (너무 빠른 클릭은 무시하는 프로그램이 있음)."""
+        button = self.settings["button"]
+        pyautogui.moveTo(self.x, self.y)
+        pyautogui.mouseDown(button=button)
+        time.sleep(CLICK_HOLD)
+        pyautogui.mouseUp(button=button)
 
     def tick(self):
         try:
@@ -260,15 +332,14 @@ class App:
     def check(self):
         if self.captured is not None:
             self.finish_capture()
-        if self.toggle_pressed:
-            self.toggle_pressed = False
-            self.toggle()
+        while self.key_events:
+            self.on_key(self.key_events.popleft())
         if self.watching:
             now = read_pixel(self.sct, self.x, self.y)
             if is_changed(self.base, now, self.safe_tolerance()):
                 self.watching = False  # 한 번 클릭하면 감시 끄기
                 try:
-                    pyautogui.click(self.x, self.y, button=self.settings["button"])
+                    self.click()
                     self.clicks += 1
                     self.refresh(f"{time.strftime('%H:%M:%S')} 클릭! (총 {self.clicks}회)\n"
                                  f"RGB{self.base} → RGB{now}")
@@ -286,7 +357,14 @@ class App:
     def save_options(self):
         self.settings["tolerance"] = self.safe_tolerance()
         self.settings["button"] = self.button.get()
+        self.settings["mode"] = self.mode.get()
         save_settings(self.settings)
+
+    def restart_as_admin(self):
+        if relaunch_as_admin():
+            self.close()
+        else:
+            self.refresh("관리자 실행이 취소됐어요")
 
     def close(self):
         self.settings["window"] = f"+{self.root.winfo_x()}+{self.root.winfo_y()}"

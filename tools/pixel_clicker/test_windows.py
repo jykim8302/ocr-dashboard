@@ -1,7 +1,9 @@
 """Windows 실제 동작 테스트 (GitHub Actions의 Windows 컴퓨터에서 실행).
 
 진짜 키 입력과 진짜 마우스 클릭으로 아래를 확인한다.
-- 단축키로 감시 켜기 -> 색이 바뀌면 한 번 클릭 -> 꺼짐
+- [누르고 있는 동안] 방식: 누르는 동안만 감시, 떼면 꺼짐, 누른 채 색이 바뀌면 클릭
+- 클릭할 때 버튼을 잠깐 누르고 있다가 뗌 (너무 빠른 클릭 방지)
+- [켜기/끄기] 방식: 단축키로 감시 켜기 -> 색이 바뀌면 한 번 클릭 -> 꺼짐
 - 단축키로 켰다 끄면 색이 바뀌어도 클릭 안 함
 - 단축키를 꾹 눌러도 한 번만 켜짐
 - [단축키 설정] 버튼으로 Ctrl+Alt+S 지정 -> 파일에 저장 -> 그 키로만 동작
@@ -27,20 +29,22 @@ import pixel_clicker as pc  # noqa: E402
 OUT = Path(__file__).parent / "test_output"
 OUT.mkdir(exist_ok=True)
 pc.SETTINGS_FILE = Path(tempfile.mkdtemp()) / "hotkey_settings.json"
-pc.SETTINGS_FILE.write_text(json.dumps({"hotkey": "f8"}), encoding="utf-8")
+pc.SETTINGS_FILE.write_text(json.dumps({"hotkey": "f8"}), encoding="utf-8")  # 방식은 기본값(누르고 있는 동안)
 
 root = tk.Tk()
 app = pc.App(root)
 
 # 화면 가운데에 색이 바뀌는 사각형 (클릭되면 기록)
 clicks = []
+press_times = []  # 마우스 버튼을 누르고 있던 시간
 target = tk.Toplevel(root)
 target.overrideredirect(True)
 target.attributes("-topmost", True)
 target.geometry(f"300x300+{app.x - 150}+{app.y - 150}")
 canvas = tk.Canvas(target, bg="blue", highlightthickness=0)
 canvas.pack(fill="both", expand=True)
-canvas.bind("<Button-1>", lambda e: clicks.append(time.time()))
+canvas.bind("<ButtonPress-1>", lambda e: clicks.append(e.time))  # e.time: OS가 기록한 입력 시각(ms)
+canvas.bind("<ButtonRelease-1>", lambda e: press_times.append((e.time - clicks[-1]) / 1000))
 
 # 테스트 스레드 -> 창(메인 스레드)에 일 시키기
 jobs = queue.Queue()
@@ -102,18 +106,42 @@ def scenario():
         mouse.Controller().position = (200, 300)  # 왼쪽 위 모서리(안전장치) 피하기
         print(f"화면 가운데: ({app.x}, {app.y})", flush=True)
 
+        # --- 누르고 있는 동안 방식 (기본) ---
+        check("기본 방식 = 누르고 있는 동안", app.mode.get() == "hold")
+        kb.press(K.f8)
+        time.sleep(0.6)
+        check("F8 누르고 있는 중 -> 감시 켜짐", app.watching)
+        shot("0_holding")
+        kb.release(K.f8)
+        time.sleep(0.5)
+        check("F8 떼면 -> 꺼짐", not app.watching)
+        set_color("purple")
+        check("뗀 상태에선 클릭 안 함", len(clicks) == 0)
+
+        kb.press(K.f8)
+        time.sleep(0.6)
+        set_color("orange")
+        check("누른 채 색 바뀜 -> 클릭", len(clicks) == 1)
+        check(f"버튼 누름 시간 충분 ({press_times[-1] * 1000:.0f}ms)" if press_times else "버튼 누름 시간 기록 없음",
+              bool(press_times) and press_times[-1] >= 0.03)
+        check("클릭 후 감시 꺼짐 (누르고 있어도)", not app.watching)
+        kb.release(K.f8)
+        time.sleep(0.5)
+
+        # --- 누를 때마다 켜기/끄기 방식 ---
+        ui(lambda: (app.mode.set("toggle"), app.save_options()))
         tap(K.f8)
         check("F8 -> 감시 켜짐", app.watching)
         shot("1_watching")
         set_color("red")
-        check("색 바뀜 -> 1번 클릭", len(clicks) == 1)
+        check("색 바뀜 -> 1번 클릭", len(clicks) == 2)
         check("클릭 후 감시 꺼짐", not app.watching)
 
         tap(K.f8)
         tap(K.f8)
         check("F8 두 번 -> 꺼짐", not app.watching)
         set_color("green")
-        check("꺼진 상태에선 클릭 안 함", len(clicks) == 1)
+        check("꺼진 상태에선 클릭 안 함", len(clicks) == 2)
 
         kb.press(K.f8)
         time.sleep(1.5)
@@ -151,7 +179,7 @@ def scenario():
         time.sleep(0.6)
         check("Ctrl+Alt+S -> 감시 켜짐", app.watching)
         set_color("yellow")
-        check("색 바뀜 -> 2번째 클릭", len(clicks) == 2)
+        check("색 바뀜 -> 또 클릭", len(clicks) == 3)
         shot("4_clicked")
 
         closed.append(True)
