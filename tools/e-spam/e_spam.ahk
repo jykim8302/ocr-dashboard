@@ -14,7 +14,7 @@ SendMode "Input"
 ListLines False
 KeyHistory 0
 A_MaxHotkeysPerInterval := 10000
-DllCall("winmm\timeBeginPeriod", "UInt", 1)   ; Sleep 을 1ms 단위로 정확하게
+DllCall("winmm\timeBeginPeriod", "UInt", 1)   ; 대기를 1ms 단위로 정확하게
 OnExit 종료정리
 
 설정파일 := A_ScriptDir "\e_spam.ini"
@@ -70,6 +70,21 @@ OnExit 종료정리
     DllCall("winmm\timeEndPeriod", "UInt", 1)
 }
 
+; AutoHotkey 의 Sleep 은 최소 약 15ms 라서 속도 조절이 안 됨 → 직접 정밀하게 대기
+정밀대기(ms) {
+    static 주파수 := 0
+    if !주파수
+        DllCall("QueryPerformanceFrequency", "Int64*", &주파수)
+    시작 := 0, 지금 := 0
+    DllCall("QueryPerformanceCounter", "Int64*", &시작)
+    끝 := 시작 + 주파수 * ms // 1000
+    if ms > 1
+        DllCall("Sleep", "UInt", ms - 1)       ; 대부분은 쉬면서 대기 (CPU 절약)
+    loop                                       ; 남은 1ms 미만은 정확하게 맞춤
+        DllCall("QueryPerformanceCounter", "Int64*", &지금)
+    until 지금 >= 끝
+}
+
 ; ---- 단축키 -------------------------------------------------
 $F12::전환()
 $^F12::ExitApp
@@ -82,9 +97,9 @@ $^F12::ExitApp
     ; vk45    : 한/영 상태와 상관없이 E 키 그대로 입력
     while 켜짐 && GetKeyState("LButton", "P") {
         SendInput "{Blind^}{vk45 down}"
-        Sleep 간격
+        정밀대기(간격)
         SendInput "{Blind^}{vk45 up}"
-        Sleep 간격
+        정밀대기(간격)
     }
 }
 #HotIf
