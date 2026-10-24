@@ -145,7 +145,7 @@ uv run tools/mouse_x_lock.py
 
 | 키 | 동작 |
 |---|---|
-| `F8` | Y축 고정 / 해제 (누를 때마다 전환) |
+| `F12` | Y축 고정 / 해제 (누를 때마다 전환) |
 | 창 닫기 또는 `Ctrl+C` | 종료 (고정도 자동 해제) |
 
 * 다른 키를 쓰고 싶으면 `tools/mouse_x_lock.py` 상단의 `HOTKEY_KEY` 값을 바꾸세요.
