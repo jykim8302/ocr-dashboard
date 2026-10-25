@@ -1,0 +1,939 @@
+<meta charset="utf-8">
+<title>스프레이 반동 분석기</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=IBM+Plex+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: 한 줄 도구 화면 — 머리말, 공용 총 선택 줄, 탭 3개(그림판 + 옆 설명 패널) */
+:root {
+  --bg: #0f1317;
+  --panel: #161c22;
+  --panel2: #1d242c;
+  --line: #2a333d;
+  --fg: #e6eaee;
+  --muted: #8b97a3;
+  --accent: #ff5a61;
+  --accent-soft: rgba(255, 90, 97, 0.14);
+  --accent-ink: #1b0c0d;
+  --aim: #3ccfb4;
+  --warn: #f0b54a;
+  --good: #56c98a;
+  --f-display: "Chakra Petch", "IBM Plex Sans KR", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f2f4f6; --panel: #ffffff; --panel2: #eef1f4; --line: #d5dce2;
+    --fg: #131a21; --muted: #5b6874; --accent: #d63a43; --accent-soft: rgba(214, 58, 67, 0.1);
+    --accent-ink: #ffffff; --aim: #0d8f7a; --warn: #b9780f; --good: #23864f;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f2f4f6; --panel: #ffffff; --panel2: #eef1f4; --line: #d5dce2;
+  --fg: #131a21; --muted: #5b6874; --accent: #d63a43; --accent-soft: rgba(214, 58, 67, 0.1);
+  --accent-ink: #ffffff; --aim: #0d8f7a; --warn: #b9780f; --good: #23864f;
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-body); font-size: 15px; line-height: 1.6; }
+.wrap {
+  max-width: 1180px; margin: 0 auto; display: grid; gap: 20px;
+  padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.eyebrow { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); }
+h1 { margin: 4px 0 6px; font-size: clamp(28px, 4.4vw, 42px); line-height: 1.15; letter-spacing: -0.02em; font-weight: 700; text-wrap: balance; }
+h2 { margin: 0; font-size: 22px; line-height: 1.25; text-wrap: balance; }
+h3 { margin: 0; font-size: 14px; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.picker .label { font-size: 13px; color: var(--muted); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: grid; gap: 0; text-align: left; cursor: pointer;
+  padding: 7px 14px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--fg); font: 700 15px var(--f-body);
+}
+.chip small { font-size: 11px; font-weight: 500; color: var(--muted); }
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tab {
+  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap;
+  padding: 10px 16px; color: var(--muted); font: 700 15px var(--f-body);
+}
+.tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tab:hover { color: var(--fg); }
+
+.bench { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+.stage { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 10px; min-width: 0; }
+.side { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.wtype { margin: -8px 0 0; color: var(--muted); font-size: 13px; }
+
+canvas { display: block; max-width: 100%; }
+#patCv { width: 100%; aspect-ratio: 1 / 1; max-height: 600px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); align-items: center; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.swatch { width: 34px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--warn), var(--accent)); }
+.dash { width: 30px; border-top: 2px dashed var(--aim); }
+
+.stats { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.stats div { border-top: 1px solid var(--line); padding: 8px 0; }
+.stats dt { font-size: 12.5px; color: var(--muted); }
+.stats dd { margin: 0; font-family: var(--f-display); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 1px 10px; border-radius: 999px; font: 700 13px var(--f-body); }
+.pill.good { color: var(--good); background: color-mix(in srgb, var(--good) 16%, transparent); }
+.pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.pill.bad { color: var(--accent); background: var(--accent-soft); }
+
+.tips { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.tips li::marker { color: var(--accent); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.btn {
+  font: 700 14px var(--f-body); padding: 9px 14px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel2); color: var(--fg);
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; }
+.toggle { display: inline-flex; gap: 8px; align-items: center; font-size: 14px; cursor: pointer; }
+input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
+:focus-visible { outline: 2px solid var(--aim); outline-offset: 2px; }
+.note { margin: 0; font-size: 12.5px; color: var(--muted); max-width: 80ch; }
+
+.drop { position: relative; border: 1.5px dashed var(--line); border-radius: 8px; min-height: 240px; display: grid; place-items: center; overflow: hidden; background: var(--panel2); }
+.drop.has { border-style: solid; min-height: 0; }
+.drop.over { border-color: var(--aim); }
+#sprayCv { width: 100%; height: auto; cursor: crosshair; }
+.placeholder { padding: 24px; text-align: center; color: var(--muted); }
+.badge { position: absolute; top: 10px; left: 10px; background: var(--warn); color: var(--accent-ink); font: 700 12px var(--f-body); padding: 3px 9px; border-radius: 4px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.slider { display: inline-flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; }
+.slider input { width: 110px; }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--muted); font-size: 14px; }
+.hint { margin: 0; padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--aim) 13%, transparent); font-size: 14px; font-weight: 500; }
+.scorebox { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.big { font-family: var(--f-display); font-weight: 700; font-size: 46px; line-height: 1; font-variant-numeric: tabular-nums; }
+.scorebox .cap { color: var(--muted); font-size: 13px; }
+
+#prCv { width: 100%; aspect-ratio: 16 / 10; max-height: 560px; touch-action: none; cursor: crosshair; border-radius: 8px; user-select: none; -webkit-user-select: none; }
+@media (max-width: 600px) { #prCv { aspect-ratio: 4 / 5; } }
+.hud { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+.hud .k { display: block; font-size: 12.5px; color: var(--muted); }
+.hud b { font-family: var(--f-display); font-size: 26px; font-variant-numeric: tabular-nums; }
+.msg { margin: 0; font-weight: 500; }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Valorant · 비공식 팬 도구</p>
+    <h1>스프레이 반동 분석기</h1>
+    <p class="lede">총이 어느 방향으로 튀는지 보고, 내 사격 사진을 분석하고, 마우스로 반동 잡는 연습까지 한 곳에서 해요.</p>
+  </header>
+
+  <section class="picker" aria-label="총 선택">
+    <span class="label">총 선택</span>
+    <div class="chips" id="chips"></div>
+  </section>
+
+  <nav class="tabs" role="tablist" aria-label="기능">
+    <button class="tab" role="tab" id="tab-pattern" aria-controls="panel-pattern" aria-selected="true">총기별 패턴</button>
+    <button class="tab" role="tab" id="tab-mine" aria-controls="panel-mine" aria-selected="false">내 스프레이 분석</button>
+    <button class="tab" role="tab" id="tab-practice" aria-controls="panel-practice" aria-selected="false">보정 연습</button>
+  </nav>
+
+  <!-- 총기별 패턴 -->
+  <section class="panel" id="panel-pattern" role="tabpanel" aria-labelledby="tab-pattern">
+    <div class="bench">
+      <div class="stage">
+        <canvas id="patCv" aria-label="선택한 총의 반동 패턴 그림"></canvas>
+        <div class="legend">
+          <span><i class="swatch"></i>첫 발 → 마지막 발</span>
+          <span><i class="dash"></i>마우스를 움직여야 할 길</span>
+          <span id="patCaption"></span>
+        </div>
+      </div>
+      <aside class="side">
+        <div>
+          <h2 id="wName"></h2>
+        </div>
+        <p class="wtype" id="wType"></p>
+        <dl class="stats" id="wStats"></dl>
+        <h3>이렇게 쏘세요</h3>
+        <ul class="tips" id="wTips"></ul>
+        <div class="controls">
+          <button class="btn primary" id="playBtn">▶ 쏘는 순서 보기</button>
+          <button class="btn" id="rerollBtn">다시 쏘기</button>
+        </div>
+        <label class="toggle"><input type="checkbox" id="showComp" checked> 마우스 보정 길 보기</label>
+        <p class="note">'다시 쏘기'를 눌러보면 앞쪽 탄은 거의 같은 자리로, 뒤쪽 탄은 매번 다르게 튀는 걸 볼 수 있어요.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 내 스프레이 분석 -->
+  <section class="panel" id="panel-mine" role="tabpanel" aria-labelledby="tab-mine" hidden>
+    <div class="bench">
+      <div class="stage">
+        <div class="drop" id="drop">
+          <div class="placeholder" id="dropHint">스크린샷을 여기로 끌어다 놓거나<br>'사진 올리기'를 눌러주세요</div>
+          <canvas id="sprayCv" aria-label="올린 사격 사진과 탄 자국 표시" hidden></canvas>
+          <span class="badge" id="exampleBadge" hidden>예시 사진</span>
+        </div>
+        <div class="toolbar">
+          <button class="btn primary" id="uploadBtn">사진 올리기</button>
+          <input type="file" id="fileIn" accept="image/*" hidden>
+          <button class="btn" id="exampleBtn">예시로 해보기</button>
+          <button class="btn" id="autoBtn">탄 자국 자동 찾기</button>
+          <label class="slider" for="sens">민감도 <input type="range" id="sens" min="10" max="60" value="40"></label>
+          <button class="btn ghost" id="undoBtn">되돌리기</button>
+          <button class="btn ghost" id="clearBtn">점 모두 지우기</button>
+        </div>
+      </div>
+      <aside class="side">
+        <h2>내 스프레이 분석</h2>
+        <ol class="steps">
+          <li>사격장에서 벽에 대고 연사해요.</li>
+          <li>스크린샷을 올려요. 끌어다 놓기와 Ctrl+V 붙여넣기도 돼요.</li>
+          <li>처음 조준했던 곳을 클릭한 뒤, 탄 자국을 쏜 순서대로 클릭해요. '자동 찾기'를 눌러도 돼요.</li>
+        </ol>
+        <p class="hint" id="hint"></p>
+        <div id="results" hidden>
+          <div class="scorebox">
+            <span class="big" id="rScore"></span>
+            <span class="pill" id="rGrade"></span>
+            <span class="cap">탄이 얼마나 모였는지 (100점 만점)</span>
+          </div>
+          <dl class="stats" id="rStats"></dl>
+        </div>
+        <h3>코칭</h3>
+        <ul class="tips" id="advice"></ul>
+        <p class="note">거리는 화면 높이를 100으로 본 비율(%)이에요. 해상도가 달라도 같은 기준으로 비교할 수 있어요.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 보정 연습 -->
+  <section class="panel" id="panel-practice" role="tabpanel" aria-labelledby="tab-practice" hidden>
+    <div class="bench">
+      <div class="stage">
+        <canvas id="prCv" aria-label="반동 보정 연습판. 누르고 있으면 연사됩니다."></canvas>
+      </div>
+      <aside class="side">
+        <h2>보정 연습</h2>
+        <ol class="steps">
+          <li>과녁 한가운데를 마우스로 누르고 있으면 연사돼요. 휴대폰은 손가락으로 누르세요.</li>
+          <li>총이 위로 튀니까, 누른 채로 아래로 천천히 끌어내리세요.</li>
+          <li>손을 떼면 점수가 나와요.</li>
+        </ol>
+        <div class="hud">
+          <div><span class="k">이번 점수</span><b id="prScore">–</b></div>
+          <div><span class="k">최고 점수</span><b id="prBest">–</b></div>
+        </div>
+        <p class="msg" id="prMsg">아직 쏘지 않았어요.</p>
+        <label class="toggle"><input type="checkbox" id="prGuide" checked> 정답 길 보기</label>
+        <div class="controls">
+          <button class="btn" id="prClear">탄 자국 지우기</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <p class="note">패턴 수치는 게임 속 반동의 경향을 단순하게 옮긴 근사 모형이라 실제와 조금 다를 수 있어요. 정확한 내 반동은 사격장에서 직접 쏴보고 '내 스프레이 분석'으로 확인하세요. 이 페이지는 Riot Games와 관련 없는 팬 도구예요.</p>
+</div>
+
+<script>
+(() => {
+  // ---------- 총 데이터 (근사치) ----------
+  // cap: 위로 오르기가 끝나는 탄 번호, climb: 총 상승량, sway: 좌우 흔들림 폭, spread: 무작위 퍼짐
+  const WEAPONS = {
+    vandal: { name: '밴달', en: 'Vandal', type: '소총', rate: 9.75, mag: 25, accurate: 1, cap: 9, climb: 100, drift: 5, sway: 30, step: 9, spread: 5, level: 3,
+      tips: ['첫 발이 가장 정확해요. 머리를 노리고 한 발씩 끊어 쏘면 가장 강해요.', '2~9발째는 거의 똑바로 위로 올라가요. 쏘는 동안 마우스를 아래로 꾸준히 당기세요.', '10발째부터는 위로는 멈추고 좌우로 흔들려요. 먼 적에겐 3~5발씩 끊어 쏘세요.'] },
+    phantom: { name: '팬텀', en: 'Phantom', type: '소총', rate: 11, mag: 30, accurate: 1, cap: 10, climb: 85, drift: -4, sway: 24, step: 7, spread: 8, level: 2,
+      tips: ['밴달보다 위로 덜 튀어서 연사하기 편해요.', '연사가 빨라서 아래로 당기는 속도도 조금 더 빨라야 해요.', '11발째부터 좌우 흔들림과 퍼짐이 커져요. 가까운 거리에서 길게 쏘기 좋아요.'] },
+    spectre: { name: '스펙터', en: 'Spectre', type: '기관단총', rate: 13.33, mag: 30, accurate: 1, cap: 8, climb: 68, drift: 4, sway: 26, step: 8, spread: 10, level: 2,
+      tips: ['가까운 거리에서 쓰는 연사 총이에요.', '위로 오르는 양이 적어서 아래로 살짝만 당겨도 돼요.', '멀리 쏠 땐 퍼짐이 커요. 2~3발씩 끊어 쏘세요.'] },
+    bulldog: { name: '불독', en: 'Bulldog', type: '소총', rate: 9.15, mag: 24, accurate: 1, cap: 7, climb: 80, drift: 5, sway: 28, step: 9, spread: 9, level: 3,
+      tips: ['연사보다 정조준(우클릭) 3점사가 훨씬 정확해요.', '연사하면 처음 7발 정도가 위로 올라가요.', '값이 싼 대신 연사 반동은 잡기 어려운 편이에요.'] },
+    stinger: { name: '스팅어', en: 'Stinger', type: '기관단총', rate: 16, mag: 20, accurate: 1, cap: 6, climb: 62, drift: -6, sway: 32, step: 11, spread: 16, level: 3,
+      tips: ['연사가 아주 빨라서 탄이 넓게 퍼져요.', '가까운 거리에선 그냥 연사, 멀리선 정조준 4점사를 쓰세요.', '짧게 끊어 쏘면 퍼짐이 확 줄어요.'] },
+    ares: { name: '아레스', en: 'Ares', type: '기관총', rate: 11.5, rateLabel: '10 → 13', mag: 50, show: 50, accurate: 1, cap: 12, climb: 90, drift: 6, sway: 20, step: 6, spread: 12, level: 2,
+      tips: ['쏠수록 연사가 빨라져요.', '처음 12발 정도 위로 오른 뒤엔 비교적 안정돼요.', '탄창이 커서 벽 너머로 길게 쏘기 좋아요.'] },
+    odin: { name: '오딘', en: 'Odin', type: '기관총', rate: 13.5, rateLabel: '12 → 15.6', mag: 100, show: 50, accurate: 1, cap: 14, climb: 95, drift: -5, sway: 22, step: 6, spread: 14, level: 2,
+      tips: ['처음엔 느리다가 점점 빨라져요.', '앉아서 쏘면 탄 퍼짐이 줄어요.', '처음 14발 정도 아래로 당기고 나면 그 뒤로는 비교적 일정하게 날아가요.'] },
+  };
+  const LEVEL = { 1: ['쉬움', 'good'], 2: ['보통', 'warn'], 3: ['어려움', 'bad'] };
+
+  const $ = s => document.querySelector(s);
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 저장 못 해도 동작에는 문제 없음 */ } },
+  };
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let weaponKey = WEAPONS[store.get('recoil.weapon')] ? store.get('recoil.weapon') : 'vandal';
+  const cur = () => WEAPONS[weaponKey];
+
+  // ---------- 공용 도구 ----------
+  function rng(seed) {
+    let a = seed >>> 0;
+    return () => {
+      a = (a + 0x6D2B79F5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // 반동 패턴: 각 탄이 첫 조준점에서 얼마나 벗어나는지 (x: 오른쪽 +, y: 위쪽 +)
+  function makePattern(w, seed, n) {
+    const r = rng(seed);
+    const climbN = w.cap - w.accurate;
+    const pts = [];
+    let sway = 0, dir = r() < 0.5 ? -1 : 1;
+    for (let i = 0; i < n; i++) {
+      if (i < w.accurate) { pts.push({ x: 0, y: 0 }); continue; }
+      const k = i - w.accurate + 1;
+      const t = Math.min(1, k / climbN);
+      let y = w.climb * (1 - Math.pow(1 - t, 1.35));
+      let x = w.drift * t;
+      if (k > climbN) {
+        sway += dir * w.step * (0.6 + r() * 0.8);
+        if (Math.abs(sway) > w.sway) { sway = Math.sign(sway) * w.sway; dir = -dir; }
+        else if (r() < 0.12) dir = -dir;
+        x += sway;
+        y += (r() - 0.5) * w.climb * 0.08;
+      }
+      const j = w.spread * t;
+      x += (r() - 0.5) * j;
+      y += (r() - 0.5) * j * 0.6;
+      pts.push({ x, y });
+    }
+    return pts;
+  }
+
+  const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const colors = () => ({ bg: tok('--bg'), panel: tok('--panel'), panel2: tok('--panel2'), line: tok('--line'), fg: tok('--fg'), muted: tok('--muted'), accent: tok('--accent'), aim: tok('--aim'), warn: tok('--warn'), good: tok('--good') });
+  function hex(h) {
+    h = h.replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const mix = (a, b, t) => { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(',')})`; };
+  const alpha = (h, a) => { const [r, g, b] = hex(h); return `rgba(${r},${g},${b},${a})`; };
+  const shotColor = (c, i, n) => mix(c.warn, c.accent, n > 1 ? i / (n - 1) : 0);
+  const fmt = v => (Math.round(v * 10) / 10).toFixed(1);
+  const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+
+  function fitCanvas(cv) {
+    const r = cv.getBoundingClientRect();
+    const d = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    return { ctx, w: r.width, h: r.height };
+  }
+  function arrow(ctx, x1, y1, x2, y2, size) {
+    const a = Math.atan2(y2 - y1, x2 - x1);
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - size * Math.cos(a - 0.45), y2 - size * Math.sin(a - 0.45));
+    ctx.lineTo(x2 - size * Math.cos(a + 0.45), y2 - size * Math.sin(a + 0.45));
+    ctx.closePath();
+    ctx.fill();
+  }
+  function crosshair(ctx, x, y, len, gap, color, width) {
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(x - gap - len, y); ctx.lineTo(x - gap, y);
+    ctx.moveTo(x + gap, y); ctx.lineTo(x + gap + len, y);
+    ctx.moveTo(x, y - gap - len); ctx.lineTo(x, y - gap);
+    ctx.moveTo(x, y + gap); ctx.lineTo(x, y + gap + len);
+    ctx.stroke();
+  }
+
+  // ---------- 총 선택 ----------
+  function renderChips() {
+    $('#chips').innerHTML = Object.entries(WEAPONS).map(([k, w]) =>
+      `<button class="chip" data-k="${k}" aria-pressed="${k === weaponKey}">${w.name}<small>${w.type}</small></button>`).join('');
+  }
+  $('#chips').addEventListener('click', e => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    weaponKey = b.dataset.k;
+    store.set('recoil.weapon', weaponKey);
+    document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.k === weaponKey));
+    pat.seed = 1; rebuildPattern(); pat.shown = Infinity; renderInfo(); drawPattern();
+    pr.holes = []; pr.score = null; renderPrHud('아직 쏘지 않았어요.'); drawPractice();
+  });
+
+  // ---------- 탭 ----------
+  const TABS = ['pattern', 'mine', 'practice'];
+  function showTab(t) {
+    TABS.forEach(k => {
+      $('#tab-' + k).setAttribute('aria-selected', k === t);
+      $('#panel-' + k).hidden = k !== t;
+    });
+    store.set('recoil.tab', t);
+    requestAnimationFrame(redrawAll);
+  }
+  TABS.forEach(k => $('#tab-' + k).addEventListener('click', () => showTab(k)));
+
+  // ---------- 1. 총기별 패턴 ----------
+  const pat = { seed: 1, pts: [], shown: Infinity, anim: 0 };
+  const showN = w => Math.min(w.mag, w.show || w.mag);
+  function rebuildPattern() { pat.pts = makePattern(cur(), pat.seed, showN(cur())); }
+
+  function renderInfo() {
+    const w = cur();
+    const [lv, cls] = LEVEL[w.level];
+    $('#wName').textContent = w.name;
+    $('#wType').textContent = `${w.type} · ${w.en}`;
+    $('#wStats').innerHTML = [
+      ['연사 속도', `${w.rateLabel || w.rate}발/초`],
+      ['탄창', `${w.mag}발`],
+      ['정확한 첫 발', `${w.accurate}발`],
+      ['위로 오르는 구간', `${w.accurate + 1}~${w.cap}발째`],
+      ['좌우 흔들림', `${w.cap + 1}발째부터`],
+      ['보정 난이도', `<span class="pill ${cls}">${lv}</span>`],
+    ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+    $('#wTips').innerHTML = w.tips.map(t => `<li>${t}</li>`).join('');
+    const n = showN(w);
+    $('#patCaption').textContent = n < w.mag ? `처음 ${n}발만 표시` : `${n}발 전부 표시`;
+  }
+
+  function drawPattern() {
+    const cv = $('#patCv');
+    const { ctx, w, h } = fitCanvas(cv);
+    const c = colors(), wp = cur();
+    const pts = pat.pts, total = pts.length, n = Math.min(total, pat.shown);
+    const comp = $('#showComp').checked;
+    if (w < 40 || h < 40) return; // 탭이 숨겨져 있으면 그리지 않음
+    ctx.clearRect(0, 0, w, h);
+
+    let x0 = -20, x1 = 20, y0 = -10, y1 = wp.climb + 15;
+    for (const p of pts) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    if (comp) for (const p of pts) { x0 = Math.min(x0, -p.x); x1 = Math.max(x1, -p.x); y0 = Math.min(y0, -p.y); }
+    const pad = 34;
+    const s = Math.min((w - pad * 2) / (x1 - x0), (h - pad * 2) / (y1 - y0));
+    const ox = w / 2 - ((x0 + x1) / 2) * s, oy = h / 2 + ((y0 + y1) / 2) * s;
+    const X = u => ox + u * s, Y = v => oy - v * s;
+
+    // 격자
+    ctx.lineWidth = 1; ctx.strokeStyle = c.line;
+    ctx.beginPath();
+    for (let u = Math.ceil(-ox / s / 20) * 20; X(u) <= w; u += 20) { ctx.moveTo(X(u), 0); ctx.lineTo(X(u), h); }
+    for (let v = Math.ceil((oy - h) / s / 20) * 20; Y(v) >= 0; v += 20) { ctx.moveTo(0, Y(v)); ctx.lineTo(w, Y(v)); }
+    ctx.stroke();
+    ctx.strokeStyle = alpha(c.muted, 0.45);
+    ctx.beginPath(); ctx.moveTo(X(0), 0); ctx.lineTo(X(0), h); ctx.moveTo(0, Y(0)); ctx.lineTo(w, Y(0)); ctx.stroke();
+
+    // 위로 오르기가 끝나는 높이
+    ctx.setLineDash([4, 5]); ctx.strokeStyle = alpha(c.warn, 0.8);
+    ctx.beginPath(); ctx.moveTo(0, Y(wp.climb)); ctx.lineTo(w, Y(wp.climb)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = c.warn; ctx.font = '600 12px "IBM Plex Sans KR", system-ui, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(`${wp.cap}발째까지 위로 ↑  이후 좌우로 흔들림 ↔`, 8, Y(wp.climb) - 4);
+
+    // 마우스 보정 길 (패턴을 거꾸로 뒤집은 모양)
+    if (comp && n > 1) {
+      ctx.setLineDash([6, 5]); ctx.strokeStyle = c.aim; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(X(0), Y(0));
+      for (let i = 1; i < n; i++) ctx.lineTo(X(-pts[i].x), Y(-pts[i].y));
+      ctx.stroke(); ctx.setLineDash([]);
+      const a = pts[n - 2], b = pts[n - 1];
+      ctx.fillStyle = c.aim;
+      arrow(ctx, X(-a.x), Y(-a.y), X(-b.x), Y(-b.y), 10);
+      ctx.font = '700 12px "IBM Plex Sans KR", system-ui, sans-serif'; ctx.textBaseline = 'top';
+      ctx.textAlign = X(-b.x) > w - 110 ? 'right' : 'left';
+      ctx.fillText('마우스는 이렇게', X(-b.x) + (ctx.textAlign === 'right' ? -10 : 10), Math.min(h - 18, Y(-b.y) + 6));
+    }
+
+    // 탄 경로와 탄 자국
+    ctx.strokeStyle = alpha(c.muted, 0.5); ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) i ? ctx.lineTo(X(pts[i].x), Y(pts[i].y)) : ctx.moveTo(X(pts[i].x), Y(pts[i].y));
+    ctx.stroke();
+    ctx.font = '600 11px "JetBrains Mono", ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    for (let i = 0; i < n; i++) {
+      const px = X(pts[i].x), py = Y(pts[i].y);
+      ctx.fillStyle = shotColor(c, i, total);
+      ctx.beginPath(); ctx.arc(px, py, i === 0 ? 6 : 5, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = c.panel; ctx.lineWidth = 1.5; ctx.stroke();
+      if (i === 0 || (i + 1) % 5 === 0 || i === total - 1) { ctx.fillStyle = c.fg; ctx.fillText(String(i + 1), px + 8, py - 4); }
+    }
+    crosshair(ctx, X(0), Y(0), 8, 4, c.aim, 2);
+  }
+
+  function playPattern() {
+    cancelAnimationFrame(pat.anim);
+    if (reduced) { pat.shown = Infinity; drawPattern(); return; }
+    const t0 = performance.now(), ms = 1000 / cur().rate;
+    const step = now => {
+      pat.shown = Math.min(pat.pts.length, 1 + Math.floor((now - t0) / ms));
+      drawPattern();
+      if (pat.shown < pat.pts.length) pat.anim = requestAnimationFrame(step);
+    };
+    pat.anim = requestAnimationFrame(step);
+  }
+  $('#playBtn').addEventListener('click', playPattern);
+  $('#rerollBtn').addEventListener('click', () => { pat.seed = (Math.random() * 1e9) | 0; rebuildPattern(); playPattern(); });
+  $('#showComp').addEventListener('change', drawPattern);
+
+  // ---------- 2. 내 스프레이 분석 ----------
+  const spray = { base: null, start: null, holes: [], hist: [], auto: false, msg: '' };
+  const sprayCv = $('#sprayCv');
+  const markR = () => Math.max(5, sprayCv.width / 110);
+
+  function loadSprayImage(src, isExample) {
+    const k = Math.min(1, 1600 / src.width);
+    const W = Math.round(src.width * k), H = Math.round(src.height * k);
+    const b = document.createElement('canvas');
+    b.width = W; b.height = H;
+    b.getContext('2d').drawImage(src, 0, 0, W, H);
+    Object.assign(spray, { base: b, start: null, holes: [], hist: [], auto: false, msg: '' });
+    sprayCv.width = W; sprayCv.height = H;
+    sprayCv.hidden = false; $('#dropHint').hidden = true;
+    $('#exampleBadge').hidden = !isExample;
+    $('#drop').classList.add('has');
+    return k;
+  }
+
+  function loadFile(f) {
+    if (!f || !f.type.startsWith('image/')) { setMsg('이미지 파일(PNG, JPG)만 올릴 수 있어요.'); return; }
+    const url = URL.createObjectURL(f);
+    const im = new Image();
+    im.onload = () => { loadSprayImage(im, false); URL.revokeObjectURL(url); refreshSpray(); };
+    im.onerror = () => { URL.revokeObjectURL(url); setMsg('이미지를 열 수 없어요. PNG나 JPG 파일인지 확인해 주세요.'); };
+    im.src = url;
+  }
+
+  // 사격장 벽에 밴달 20발을 쏜 가상의 예시 사진 (반동을 덜 잡은 상태)
+  function makeExampleImage() {
+    const W = 1280, H = 720, cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const g = cv.getContext('2d'), r = rng(7);
+    const grd = g.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, '#bdb7aa'); grd.addColorStop(1, '#a59e90');
+    g.fillStyle = grd; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 9000; i++) {
+      g.fillStyle = r() < 0.5 ? `rgba(0,0,0,${r() * 0.07})` : `rgba(255,255,255,${r() * 0.08})`;
+      g.fillRect(r() * W, r() * H, 1 + r() * 2, 1 + r() * 2);
+    }
+    g.strokeStyle = 'rgba(60,55,48,0.35)'; g.lineWidth = 2;
+    for (let x = 160; x < W; x += 320) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, H); g.stroke(); }
+    g.fillStyle = 'rgba(40,38,34,0.25)'; g.fillRect(0, H * 0.86, W, H * 0.14);
+
+    const start = { x: 640, y: 560 }, s = 7;
+    const holes = makePattern(WEAPONS.vandal, 11, 20).map((p, i) => ({
+      x: start.x + p.x * s * 0.75 + (r() - 0.5) * 10,
+      y: start.y - p.y * s * 0.3 + (r() - 0.5) * (i >= 9 ? 56 : 14),
+    }));
+    for (const p of holes) {
+      g.fillStyle = 'rgba(70,62,54,0.45)'; g.beginPath(); g.arc(p.x, p.y, 8.5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(28,24,21,0.95)'; g.beginPath(); g.arc(p.x, p.y, 5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.18)'; g.beginPath(); g.arc(p.x + 2, p.y + 3, 2, 0, Math.PI * 2); g.fill();
+    }
+    return { canvas: cv, start };
+  }
+
+  function loadExample() {
+    const ex = makeExampleImage();
+    const k = loadSprayImage(ex.canvas, true);
+    spray.start = { x: ex.start.x * k, y: ex.start.y * k };
+    runAuto(false);
+  }
+
+  // 탄 자국 자동 찾기: 주변보다 확 어두운 작은 점을 찾아요
+  function detectHoles(img, start, sens) {
+    const sc = Math.min(1, 900 / img.width);
+    const w = Math.round(img.width * sc), h = Math.round(img.height * sc);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) gray[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    const W1 = w + 1, I = new Float64Array(W1 * (h + 1));
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++)
+      I[(y + 1) * W1 + x + 1] = gray[y * w + x] + I[y * W1 + x + 1] + I[(y + 1) * W1 + x] - I[y * W1 + x];
+
+    const R = Math.max(6, Math.round(w / 50)), thr = 70 - sens;
+    const sx = start.x * sc, sy = start.y * sc, lim2 = (h * 0.45) ** 2;
+    const mask = new Uint8Array(w * h), diff = new Float32Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if ((x - sx) ** 2 + (y - sy) ** 2 > lim2) continue;
+      const xa = Math.max(0, x - R), xb = Math.min(w, x + R + 1), ya = Math.max(0, y - R), yb = Math.min(h, y + R + 1);
+      const mean = (I[yb * W1 + xb] - I[ya * W1 + xb] - I[yb * W1 + xa] + I[ya * W1 + xa]) / ((xb - xa) * (yb - ya));
+      const dd = mean - gray[y * w + x];
+      if (dd > thr) { mask[y * w + x] = 1; diff[y * w + x] = dd; }
+    }
+
+    const minA = Math.max(3, (w / 500) ** 2), maxA = (w / 35) ** 2;
+    const seen = new Uint8Array(w * h), found = [], stack = [];
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i] || seen[i]) continue;
+      let area = 0, sxx = 0, syy = 0, con = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+      stack.push(i); seen[i] = 1;
+      while (stack.length) {
+        const j = stack.pop(), x = j % w, y = (j - x) / w;
+        area++; sxx += x; syy += y; con += diff[j];
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const q = ny * w + nx;
+          if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+        }
+      }
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      if (area < minA || area > maxA) continue;
+      if (bw / bh > 3 || bh / bw > 3 || area / (bw * bh) < 0.3) continue;
+      found.push({ x: sxx / area / sc, y: syy / area / sc, c: con / area });
+    }
+    return found.sort((a, b) => b.c - a.c).slice(0, 80).map(({ x, y }) => ({ x, y }));
+  }
+
+  // 조준점에서 가까운 순서대로 이어서 쏜 순서를 추정
+  function orderChain(start, pts) {
+    const left = pts.slice(), out = [];
+    let at = start;
+    while (left.length) {
+      let bi = 0, bd = Infinity;
+      left.forEach((p, i) => { const dd = Math.hypot(p.x - at.x, p.y - at.y); if (dd < bd) { bd = dd; bi = i; } });
+      at = left.splice(bi, 1)[0];
+      out.push(at);
+    }
+    return out;
+  }
+
+  function runAuto(saveHistory) {
+    if (!spray.base) { $('#fileIn').click(); return; }
+    if (!spray.start) { setMsg('먼저 처음 조준했던 곳을 클릭해 주세요. 그 주변에서 탄 자국을 찾아요.'); return; }
+    if (saveHistory) pushHist();
+    spray.holes = orderChain(spray.start, detectHoles(spray.base, spray.start, +$('#sens').value));
+    spray.auto = true;
+    spray.msg = spray.holes.length
+      ? `탄 자국 ${spray.holes.length}개를 찾았어요. 틀린 점은 클릭해서 지우고, 빠진 곳은 클릭해서 더하세요.`
+      : '탄 자국을 못 찾았어요. 민감도를 올리거나 직접 클릭해 주세요.';
+    refreshSpray();
+  }
+
+  function pushHist() {
+    spray.hist.push(JSON.stringify({ start: spray.start, holes: spray.holes }));
+    if (spray.hist.length > 100) spray.hist.shift();
+  }
+  function setMsg(t) { spray.msg = t; renderHint(); }
+
+  function analyze() {
+    const { start, holes, base } = spray;
+    if (!base || !start || holes.length < 2) return null;
+    const u = base.height / 100;
+    const rel = holes.map(p => ({ x: (p.x - start.x) / u, y: (start.y - p.y) / u }));
+    const xs = rel.map(p => p.x), ys = rel.map(p => p.y);
+    const late = rel.slice(Math.min(5, rel.length - 1));
+    const meanX = avg(xs), meanY = avg(ys);
+    const dist = avg(rel.map(p => Math.hypot(p.x, p.y)));
+    return {
+      n: rel.length, meanX, meanY, dist,
+      maxUp: Math.max(0, ...ys),
+      width: Math.max(...xs) - Math.min(...xs),
+      lateW: late.length > 2 ? Math.max(...late.map(p => p.x)) - Math.min(...late.map(p => p.x)) : 0,
+      riseAt: rel.findIndex(p => p.y > 5),
+      score: Math.round(100 * Math.exp(-dist / 10)),
+      center: { x: start.x + meanX * u, y: start.y - meanY * u },
+    };
+  }
+
+  function coaching(a) {
+    const out = [];
+    if (a.meanY > 3 || a.maxUp > 8) {
+      out.push(`탄이 조준점보다 평균 ${fmt(a.meanY)}% 위에 맞았어요. 쏘는 동안 마우스를 더 아래로 당기세요.`);
+      if (a.riseAt > 0) out.push(`${a.riseAt + 1}발째부터 크게 올라가요. 그때부터 당기는 속도를 높이세요.`);
+    } else if (a.meanY < -3) {
+      out.push(`탄이 조준점보다 평균 ${fmt(-a.meanY)}% 아래에 맞았어요. 너무 세게 당겼으니 힘을 조금 빼세요.`);
+    }
+    if (Math.abs(a.meanX) > 2.5) {
+      const d = a.meanX > 0 ? '오른쪽' : '왼쪽', o = a.meanX > 0 ? '왼쪽' : '오른쪽';
+      out.push(`탄이 ${d}으로 쏠렸어요. 쏘면서 마우스를 ${o}으로 살짝 끌어주세요.`);
+    }
+    if (a.n >= 8 && a.lateW > 8) out.push(`뒤쪽 탄이 좌우로 넓게 퍼졌어요 (폭 ${fmt(a.lateW)}%). 길게 쏘기보다 5~8발씩 끊어 쏘세요.`);
+    if (!out.length) out.push('아주 좋아요! 탄이 조준점 주변에 잘 모여 있어요. 이 감각을 유지하세요.');
+    return out;
+  }
+
+  function renderHint() {
+    let t;
+    if (spray.msg) t = spray.msg;
+    else if (!spray.base) t = "사진을 올리거나 '예시로 해보기'를 눌러보세요.";
+    else if (!spray.start) t = '① 처음 조준했던 곳(크로스헤어 위치)을 클릭하세요.';
+    else if (spray.holes.length < 2) t = "② 탄 자국을 쏜 순서대로 클릭하세요. '탄 자국 자동 찾기'를 눌러도 돼요.";
+    else t = `탄 ${spray.holes.length}개로 분석했어요. 점을 더하거나 지우면 바로 다시 계산돼요.`;
+    $('#hint').textContent = t;
+  }
+
+  function refreshSpray() {
+    const a = analyze();
+    drawSpray(a);
+    renderHint();
+    $('#results').hidden = !a;
+    if (!a) {
+      $('#advice').innerHTML = '<li>탄 자국을 2개 이상 찍으면 여기에 코칭이 나와요.</li>';
+      return;
+    }
+    const grade = a.score >= 80 ? ['훌륭해요', 'good'] : a.score >= 60 ? ['좋아요', 'good'] : a.score >= 40 ? ['보통', 'warn'] : ['연습 필요', 'bad'];
+    $('#rScore').textContent = a.score;
+    $('#rGrade').textContent = grade[0];
+    $('#rGrade').className = 'pill ' + grade[1];
+    $('#rStats').innerHTML = [
+      ['찍은 탄 수', `${a.n}발`],
+      ['가장 높이 튄 곳', `${fmt(a.maxUp)}%`],
+      ['좌우 퍼진 폭', `${fmt(a.width)}%`],
+      ['조준점에서 평균 거리', `${fmt(a.dist)}%`],
+    ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('');
+    $('#advice').innerHTML = coaching(a).map(t => `<li>${t}</li>`).join('');
+  }
+
+  function drawSpray(a) {
+    if (!spray.base) return;
+    const g = sprayCv.getContext('2d'), c = colors(), r = markR();
+    const { start, holes } = spray;
+    g.drawImage(spray.base, 0, 0);
+    if (start && holes.length) {
+      g.strokeStyle = alpha(c.accent, 0.6); g.lineWidth = Math.max(1.5, r / 3);
+      g.beginPath(); g.moveTo(start.x, start.y);
+      holes.forEach(p => g.lineTo(p.x, p.y));
+      g.stroke();
+    }
+    const fs = Math.round(r * 1.7);
+    g.font = `600 ${fs}px "JetBrains Mono", ui-monospace, monospace`;
+    g.textAlign = 'left'; g.textBaseline = 'bottom';
+    holes.forEach((p, i) => {
+      g.strokeStyle = shotColor(c, i, holes.length); g.lineWidth = Math.max(2, r / 2.5);
+      g.beginPath(); g.arc(p.x, p.y, r, 0, Math.PI * 2); g.stroke();
+      if (i === 0 || (i + 1) % 5 === 0 || i === holes.length - 1 || holes.length <= 12) {
+        g.lineWidth = Math.max(3, r / 2); g.strokeStyle = 'rgba(0,0,0,0.8)'; g.fillStyle = '#ffffff';
+        g.strokeText(String(i + 1), p.x + r, p.y - r * 0.6);
+        g.fillText(String(i + 1), p.x + r, p.y - r * 0.6);
+      }
+    });
+    if (start) {
+      crosshair(g, start.x, start.y, r * 1.6, r * 0.7, 'rgba(0,0,0,0.6)', Math.max(4, r / 1.6));
+      crosshair(g, start.x, start.y, r * 1.6, r * 0.7, c.aim, Math.max(2, r / 3));
+    }
+    // 보정해야 할 방향: 탄 무리 가운데 → 조준점
+    if (a && start && a.dist > 2.5) {
+      const ux = a.center.x, uy = a.center.y;
+      g.setLineDash([r, r * 0.8]); g.strokeStyle = c.aim; g.lineWidth = Math.max(2, r / 2.5);
+      g.beginPath(); g.moveTo(ux, uy); g.lineTo(start.x, start.y + 0.001); g.stroke(); g.setLineDash([]);
+      g.fillStyle = c.aim; arrow(g, ux, uy, start.x, start.y, r * 2.2);
+      g.beginPath(); g.arc(ux, uy, r * 0.6, 0, Math.PI * 2); g.fill();
+      const label = '보정 방향';
+      g.font = `700 ${fs}px "IBM Plex Sans KR", system-ui, sans-serif`;
+      const tx = Math.min(sprayCv.width - g.measureText(label).width - 6, Math.max(6, (ux + start.x) / 2 + r * 1.5));
+      const ty = (uy + start.y) / 2;
+      g.lineWidth = Math.max(3, r / 2); g.strokeStyle = 'rgba(0,0,0,0.8)'; g.strokeText(label, tx, ty);
+      g.fillStyle = c.aim; g.fillText(label, tx, ty);
+    }
+  }
+
+  sprayCv.addEventListener('click', e => {
+    const rect = sprayCv.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * sprayCv.width / rect.width;
+    const y = (e.clientY - rect.top) * sprayCv.height / rect.height;
+    pushHist();
+    spray.msg = '';
+    if (!spray.start) spray.start = { x, y };
+    else {
+      const i = spray.holes.findIndex(p => Math.hypot(p.x - x, p.y - y) < markR() * 1.8);
+      if (i >= 0) spray.holes.splice(i, 1); else spray.holes.push({ x, y });
+    }
+    refreshSpray();
+  });
+  $('#drop').addEventListener('click', e => { if (!spray.base && e.target !== sprayCv) $('#fileIn').click(); });
+  $('#uploadBtn').addEventListener('click', () => $('#fileIn').click());
+  $('#fileIn').addEventListener('change', e => { loadFile(e.target.files[0]); e.target.value = ''; });
+  $('#exampleBtn').addEventListener('click', loadExample);
+  $('#autoBtn').addEventListener('click', () => runAuto(true));
+  $('#sens').addEventListener('change', () => { if (spray.auto && spray.start) runAuto(true); });
+  $('#undoBtn').addEventListener('click', () => {
+    const last = spray.hist.pop();
+    if (!last) { setMsg('더 되돌릴 게 없어요.'); return; }
+    Object.assign(spray, JSON.parse(last), { msg: '' });
+    refreshSpray();
+  });
+  $('#clearBtn').addEventListener('click', () => {
+    if (!spray.base) return;
+    pushHist();
+    Object.assign(spray, { start: null, holes: [], auto: false, msg: '' });
+    refreshSpray();
+  });
+  const drop = $('#drop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); loadFile(e.dataTransfer.files[0]); });
+  document.addEventListener('paste', e => {
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (item) { showTab('mine'); loadFile(item.getAsFile()); }
+  });
+
+  // ---------- 3. 보정 연습 ----------
+  const pr = { holes: [], pts: [], firing: false, shot: 0, last: 0, pointer: null, score: null };
+  const prCv = $('#prCv');
+  function prGeom() {
+    const r = prCv.getBoundingClientRect();
+    return { w: r.width, h: r.height, tx: r.width / 2, ty: r.height * 0.36, R: Math.max(14, Math.min(r.width, r.height) * 0.05), s: r.height * 0.3 / cur().climb };
+  }
+  const pos = e => { const r = prCv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const bestKey = () => 'recoil.best.' + weaponKey;
+
+  prCv.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { prCv.setPointerCapture(e.pointerId); } catch (err) { /* 일부 브라우저는 지원 안 함 */ }
+    const w = cur();
+    Object.assign(pr, { pts: makePattern(w, (Math.random() * 1e9) | 0, w.mag), holes: [], shot: 0, firing: true, pointer: pos(e), last: performance.now() - 1000 / w.rate });
+    requestAnimationFrame(prLoop);
+  });
+  prCv.addEventListener('pointermove', e => { if (pr.firing) pr.pointer = pos(e); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => prCv.addEventListener(t, prStop));
+
+  function prLoop() {
+    if (!pr.firing) return;
+    const now = performance.now(), w = cur(), ms = 1000 / w.rate, g = prGeom();
+    while (now - pr.last >= ms && pr.shot < w.mag) {
+      pr.last += ms;
+      const p = pr.pts[pr.shot++];
+      pr.holes.push({ x: pr.pointer.x + p.x * g.s, y: pr.pointer.y - p.y * g.s });
+    }
+    if (pr.shot >= w.mag) { prStop(); return; }
+    drawPractice();
+    requestAnimationFrame(prLoop);
+  }
+
+  function prStop() {
+    if (!pr.firing) return;
+    pr.firing = false;
+    const g = prGeom(), H = pr.holes;
+    let msg = '아직 쏘지 않았어요.';
+    if (H.length) {
+      const dist = avg(H.map(p => Math.hypot(p.x - g.tx, p.y - g.ty)));
+      pr.score = Math.max(0, Math.round(100 - (dist / g.R) * 30));
+      const best = +store.get(bestKey()) || 0;
+      if (pr.score > best) store.set(bestKey(), String(pr.score));
+      const rest = H.length > 3 ? H.slice(2) : H;
+      const dy = avg(rest.map(p => p.y - g.ty)), dx = avg(rest.map(p => p.x - g.tx));
+      const tips = [];
+      if (Math.hypot(H[0].x - g.tx, H[0].y - g.ty) > g.R * 2) tips.push('과녁 한가운데를 누르고 시작하세요.');
+      if (dy < -g.R * 0.8) tips.push('탄이 과녁보다 위로 갔어요. 더 세게 아래로 당기세요.');
+      else if (dy > g.R * 0.8) tips.push('너무 많이 당겼어요. 힘을 조금 빼세요.');
+      if (Math.abs(dx) > g.R * 0.8) tips.push(dx > 0 ? '오른쪽으로 쏠렸어요. 왼쪽으로 살짝 끌어주세요.' : '왼쪽으로 쏠렸어요. 오른쪽으로 살짝 끌어주세요.');
+      if (H.length < 4) tips.push('짧게 끊어 쐈어요. 이번엔 길게 누른 채로 아래로 당겨보세요.');
+      if (!tips.length) tips.push(H.length > cur().cap ? '좋아요! 반동을 잘 잡았어요.' : '좋아요! 이번엔 더 길게 쏴보세요.');
+      msg = `${H.length}발 · ${tips.join(' ')}`;
+    }
+    renderPrHud(msg);
+    drawPractice();
+  }
+
+  function renderPrHud(msg) {
+    $('#prScore').textContent = pr.score == null ? '–' : pr.score;
+    const best = store.get(bestKey());
+    $('#prBest').textContent = best == null ? '–' : best;
+    $('#prMsg').textContent = msg;
+  }
+
+  function drawPractice() {
+    const { ctx, w, h } = fitCanvas(prCv);
+    if (w < 40 || h < 40) return;
+    const c = colors(), g = prGeom(), wp = cur();
+    ctx.fillStyle = c.panel2; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = c.line; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = g.tx % 40; x < w; x += 40) { ctx.moveTo(x, 0); ctx.lineTo(x, h); }
+    for (let y = g.ty % 40; y < h; y += 40) { ctx.moveTo(0, y); ctx.lineTo(w, y); }
+    ctx.stroke();
+
+    // 과녁
+    [2, 1.35, 0.7].forEach((k, i) => {
+      ctx.strokeStyle = i === 2 ? c.accent : c.muted; ctx.lineWidth = i === 2 ? 2 : 1.2;
+      ctx.beginPath(); ctx.arc(g.tx, g.ty, g.R * k, 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.fillStyle = c.accent; ctx.beginPath(); ctx.arc(g.tx, g.ty, 3, 0, Math.PI * 2); ctx.fill();
+
+    // 정답 길: 반동을 거꾸로 따라가는 마우스 움직임
+    if ($('#prGuide').checked) {
+      const pts = makePattern(wp, 1, Math.min(wp.mag, 40));
+      ctx.setLineDash([6, 5]); ctx.strokeStyle = alpha(c.aim, 0.85); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(g.tx, g.ty);
+      pts.forEach(p => ctx.lineTo(g.tx - p.x * g.s, g.ty + p.y * g.s));
+      ctx.stroke(); ctx.setLineDash([]);
+      const a = pts[pts.length - 2], b = pts[pts.length - 1];
+      ctx.fillStyle = c.aim;
+      arrow(ctx, g.tx - a.x * g.s, g.ty + a.y * g.s, g.tx - b.x * g.s, g.ty + b.y * g.s, 10);
+      ctx.font = '700 12px "IBM Plex Sans KR", system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText('누른 채 이 길로 내리기', g.tx + g.R * 2.3, g.ty + wp.climb * g.s * 0.55);
+    }
+
+    // 탄 자국
+    pr.holes.forEach((p, i) => {
+      ctx.fillStyle = shotColor(c, i, Math.max(wp.cap * 2, pr.holes.length));
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = c.panel2; ctx.lineWidth = 1; ctx.stroke();
+    });
+
+    // 쏘는 중: 마우스 위치와 실제로 총구가 향한 곳
+    if (pr.firing && pr.pointer) {
+      const p = pr.pts[Math.min(pr.shot, pr.pts.length - 1)];
+      const ax = pr.pointer.x + p.x * g.s, ay = pr.pointer.y - p.y * g.s;
+      ctx.strokeStyle = alpha(c.muted, 0.7); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(pr.pointer.x, pr.pointer.y); ctx.lineTo(ax, ay); ctx.stroke();
+      ctx.beginPath(); ctx.arc(pr.pointer.x, pr.pointer.y, 6, 0, Math.PI * 2); ctx.stroke();
+      crosshair(ctx, ax, ay, 7, 3, c.aim, 2);
+    }
+
+    ctx.font = '600 13px "JetBrains Mono", ui-monospace, monospace'; ctx.fillStyle = c.muted;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(`${wp.en.toUpperCase()}  ${pr.shot}/${wp.mag}`, 12, 12);
+
+    if (!pr.firing && !pr.holes.length) {
+      ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = c.fg;
+      ctx.font = '700 15px "IBM Plex Sans KR", system-ui, sans-serif';
+      ctx.fillText('과녁을 누르고 있으면 연사돼요', w / 2, h - 52);
+      ctx.fillStyle = c.muted; ctx.font = '500 13px "IBM Plex Sans KR", system-ui, sans-serif';
+      ctx.fillText('누른 채로 아래로 끌어내려 반동을 잡아보세요', w / 2, h - 30);
+    }
+  }
+  $('#prGuide').addEventListener('change', drawPractice);
+  $('#prClear').addEventListener('click', () => { pr.holes = []; pr.shot = 0; drawPractice(); });
+
+  // ---------- 시작 ----------
+  function redrawAll() { drawPattern(); refreshSpray(); drawPractice(); }
+  window.addEventListener('resize', () => requestAnimationFrame(redrawAll));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', redrawAll);
+  new MutationObserver(redrawAll).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  if (document.fonts) document.fonts.ready.then(redrawAll);
+
+  renderChips();
+  rebuildPattern();
+  renderInfo();
+  loadExample();
+  renderPrHud('아직 쏘지 않았어요.');
+  const hashTab = location.hash.slice(1);
+  showTab(TABS.includes(hashTab) ? hashTab : (TABS.includes(store.get('recoil.tab')) ? store.get('recoil.tab') : 'pattern'));
+})();
+</script>
