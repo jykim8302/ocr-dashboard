@@ -1,0 +1,26 @@
+name: Valorant crosshair overlay (Windows exe)
+
+on:
+  push:
+    paths:
+      - "valorant_crosshair/**"
+      - ".github/workflows/crosshair-exe.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyinstaller pillow
+      - name: Self test (real overlay on Windows)
+        run: python valorant_crosshair/crosshair_overlay.py --selftest
+      - name: Build exe
+        run: pyinstaller --onefile --noconsole --name ValorantCrosshair valorant_crosshair/crosshair_overlay.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ValorantCrosshair
+          path: dist/ValorantCrosshair.exe
