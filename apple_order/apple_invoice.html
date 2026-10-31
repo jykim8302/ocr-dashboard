@@ -123,8 +123,8 @@
   .stepper input { width: 80px; text-align: center; border-radius: 0; border-left: 0; border-right: 0; font-weight: 700; }
 
   .zip-row { display: flex; gap: 8px; }
-  .zip-row input { flex: 0 0 120px; font-weight: 700; letter-spacing: .05em; }
-  .zip-row button { flex: 1; }
+  .zip-row input { flex: 0 0 110px; min-width: 0; font-weight: 700; letter-spacing: .05em; }
+  .zip-row button { flex: 1; min-width: 0; white-space: normal; }
 
   details.box {
     border: 1.5px dashed var(--line);
@@ -145,6 +145,39 @@
   .sum-note { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 4px; }
   .check { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 15px; }
   .check input { width: 20px; height: 20px; accent-color: var(--apple); }
+
+  /* ---------- 주문 자동 인식 ---------- */
+  .recog {
+    border: 2px dashed #E8B4B8;
+    background: #FFF8F8;
+    border-radius: 14px;
+    padding: 14px;
+    margin-bottom: 22px;
+    transition: border-color .15s, background .15s;
+  }
+  .recog.drag { border-color: var(--apple); background: var(--apple-soft); }
+  .recog.busy textarea, .recog.busy .recog-btns { opacity: .55; pointer-events: none; }
+  .recog-head { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; margin-bottom: 8px; font-size: 17px; }
+  .recog textarea { min-height: 120px; }
+  .recog-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 8px; }
+  .recog-btns .btn { white-space: normal; padding: 11px 8px; }
+  .ocr-progress { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
+  .ocr-progress img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+  .ocr-bar-wrap { flex: 1; min-width: 0; }
+  .ocr-msg { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .ocr-bar { height: 8px; background: #F1E1E1; border-radius: 99px; overflow: hidden; }
+  .ocr-bar i { display: block; height: 100%; width: 0; background: var(--apple); transition: width .25s; }
+  .recog-result { list-style: none; margin: 12px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 6px; }
+  .recog-result li { background: #fff; border: 1.5px solid var(--line); border-radius: 10px; padding: 6px 10px; min-width: 0; }
+  .recog-result li span { display: block; color: var(--muted); font-size: 12.5px; }
+  .recog-result li b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
+  .recog-result li.ok { border-color: #BFE3CD; background: var(--leaf-soft); }
+  .recog-result li.miss { border-color: #F2D58A; background: #FFF8E1; }
+  .recog-result li.wait { border-color: #CFE0F5; background: #F2F7FD; }
+  .missing, .missing:focus { border-color: #E9B949 !important; background: #FFF8E1 !important; }
+  .chips.missing { border: 1.5px solid #E9B949; border-radius: 10px; padding: 6px; }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); box-shadow: 0 0 0 6px var(--apple-soft); } }
+  .btn.pulse { animation: pulse .8s ease-in-out 3; }
 
   .btn {
     border: 1.5px solid var(--line);
@@ -281,7 +314,7 @@
   <div class="top-inner">
     <div class="brand">🍎 사과 송장 만들기</div>
     <ol class="steps">
-      <li>① 주문 입력</li>
+      <li>① 주문 붙여넣기 · 사진 넣기</li>
       <li>② 확인 누르기</li>
       <li>③ 송장 파일 저장 · 인쇄</li>
     </ol>
@@ -296,11 +329,26 @@
       <button class="btn small" id="btnCancelEdit">고치기 취소</button>
     </div>
 
-    <details class="box" id="pasteBox">
-      <summary>📋 주문 문자 붙여넣기 <span class="sum-note">(자동 입력)</span></summary>
-      <textarea id="pasteText" placeholder="받은 주문 문자/카톡을 그대로 붙여넣으세요&#10;예) 홍길동 010-1234-5678&#10;서울 강남구 테헤란로 123 101동 202호&#10;부사 2박스"></textarea>
-      <button class="btn green" id="btnParse" style="margin-top:8px;width:100%">✨ 자동으로 채우기</button>
-    </details>
+    <section class="recog" id="recogBox">
+      <div class="recog-head">
+        <b>🤖 주문 자동 인식</b>
+        <span class="sum-note">문자·카톡을 붙여넣거나, 캡처·사진을 넣으면 알아서 채워요</span>
+      </div>
+      <textarea id="pasteText" placeholder="여기에 붙여넣기 (Ctrl+V)&#10;&#10;예) 홍길동 010-1234-5678&#10;서울 강남구 테헤란로 123 101동 202호&#10;부사 2박스&#10;&#10;카톡 캡처나 주문서 사진은 여기로 끌어다 놓아도 돼요"></textarea>
+      <div class="recog-btns">
+        <button type="button" class="btn" id="btnImage">📷 사진·캡처 불러오기</button>
+        <button type="button" class="btn green" id="btnParse">✨ 다시 인식하기</button>
+      </div>
+      <input type="file" id="imgInput" accept="image/*" hidden>
+      <div class="ocr-progress" id="ocrProgress" hidden>
+        <img id="ocrThumb" alt="">
+        <div class="ocr-bar-wrap">
+          <div class="ocr-msg" id="ocrMsg">글자 읽는 중…</div>
+          <div class="ocr-bar"><i id="ocrBar"></i></div>
+        </div>
+      </div>
+      <ul class="recog-result" id="recogResult" hidden></ul>
+    </section>
 
     <div class="field">
       <label for="toName">받는 분 이름 <span class="req">*</span></label>
@@ -553,7 +601,7 @@ function buildChips() {
     ).join('') + (cfg.other ? `<input class="other-input" id="${name}Other" type="text" placeholder="직접 입력" hidden>` : '');
     box.addEventListener('change', e => {
       if (e.target.name !== name) return;
-      box.classList.remove('invalid');
+      box.classList.remove('invalid', 'missing');
       if (cfg.other) {
         const other = $(`#${name}Other`);
         other.hidden = e.target.value !== '기타';
@@ -682,7 +730,8 @@ function resetForm() {
   setChoice('variety', settings.lastVariety);
   setChoice('weight', settings.lastWeight);
   setChoice('unit', settings.lastUnit);
-  $$('.invalid').forEach(el => el.classList.remove('invalid'));
+  $$('.invalid, .missing').forEach(el => el.classList.remove('invalid', 'missing'));
+  $('#recogResult').hidden = true;
   setEditing(null);
 }
 
@@ -694,82 +743,426 @@ function setEditing(id) {
 }
 
 /* =========================================================
-   주문 문자 자동 입력
+   주문 자동 인식 ① 글자에서 정보 찾기
+   (이름 · 전화번호 · 사과 종류 · 개수 · 주소 · 우편번호)
    ========================================================= */
-function parseOrderText(text) {
+const KO_NUM = { 한: 1, 하나: 1, 두: 2, 둘: 2, 세: 3, 셋: 3, 네: 4, 넷: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9, 열: 10 };
+const VARIETY_RE = [['부사(후지)', /부사|후지/], ['홍로', /[홍흥]로/], ['감홍', /감[홍흥]/], ['시나노골드', /시나노\s*골드/], ['아리수', /아리수/], ['양광', /양광/], ['홍옥', /[홍흥]옥/]];
+const PHONE_RE = /(?<!\d)(?:01[016789]|0[2-6]\d?)[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/g;
+const PHONE_ONE = new RegExp(PHONE_RE.source);   // test()·split()용 (g 없이)
+const REGION_RE = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|충청|전북|전남|전라|경북|경남|경상|제주)[가-힣]*\s*[가-힣]/;
+const CITY_RE = /[가-힣]{1,6}(?:시|군)\s+[가-힣0-9]{1,10}(?:구|읍|면|동|로|길)(?:\s|\d|$)/;
+const ADDR_WORD_RE = /[가-힣0-9](?:시|군|구|읍|면|동|리|로|길)(?:\s|\d|$)/;
+const DETAIL_RE = /\d+\s*(?:동|호|층)(?:\s|,|$)|아파트|빌라|오피스텔|맨션|타워/;
+const SENDER_RE = /보내는|보낸\s*(?:이|분|사람)|주문자|발송인|입금자/;
+const RECIP_RE = /받는|받으실|수령|수취/;
+const MEMO_HINT_RE = /맡겨|문\s*앞|경비실|부재\s*시|놓아|놔\s*주|연락\s*(?:주|부탁)|전화\s*(?:주|부탁)|초인종|벨\s/;
+const ADDR_STOP_RE = new RegExp([PHONE_RE.source, '부사|후지|홍로|감홍|시나노|아리수|양광|홍옥', '\\d+\\s*(?:박스|상자|kg|㎏|키로)', MEMO_HINT_RE.source, '\\s[가-힣]{2,4}\\s*(?:고객)?님'].join('|'), 'i');
+const NOT_NAME_RE = /안녕|감사|주문|사과|박스|상자|부사|후지|홍로|감홍|양광|홍옥|아리수|시나노|주소|전화|연락|배송|고객|문의|입금|계좌|택배|선물|요청|메모|이름|성함|성명|받는|보내|수령|수취|부탁|번호|종류|개수|수량|우편|휴대|핸드|드려|합니다|해요|주세요|입니다|세요|에요|예요|감홍|경비|아파트/;
+
+const labelRe = words => new RegExp(`^\\s*(?:${words})\\s*[:)\\]>.=-]*\\s*(.*)$`, 'i');
+const NAME_LABEL = labelRe('(?:받는|받으실|수령|수취)\\s*(?:분|사람|이|인|자)?\\s*(?:이름|성함|성명)?(?![가-힣]*\\s*:?\\s*(?:주소|전화|연락|휴대|핸드|번호|우편|곳))|이름|성함|성명|고객\\s*명');
+const PHONE_LABEL = labelRe('(?:받는\\s*(?:분|사람|이)\\s*)?(?:전화\\s*번호|전화|연락처|휴대\\s*폰|핸드\\s*폰|폰\\s*번호|H\\.?P|tel)');
+const ADDR_LABEL = labelRe('(?:받는\\s*(?:분|사람|이)\\s*)?(?:주소|배송\\s*주소|배송지|받는\\s*곳)');
+const ZIP_LABEL = labelRe('우편\\s*번호|우편');
+const VARIETY_LABEL = labelRe('(?:사과\\s*)?종류|품종|품목|상품');
+const QTY_LABEL = labelRe('개수|갯수|수량|박스\\s*수|주문\\s*수량');
+const MEMO_LABEL = labelRe('배송\\s*메모|배송\\s*요청|요청\\s*사항|요청|메모');
+
+/* 문자·카톡·사진 글자를 다듬어요 (카톡 시간 표시, 사진 인식 잡음 지우기) */
+function cleanText(raw) {
+  return String(raw)
+    .replace(/\r/g, '')
+    .replace(/^\[[^\]\n]{1,20}\]\s*\[(?:오전|오후)\s*\d{1,2}:\d{2}\]\s*/gm, '')
+    .replace(/^\d{4}[.년]\s*\d{1,2}[.월]\s*\d{1,2}[.일]?\s*(?:오전|오후)?\s*\d{1,2}:\d{2},?\s*[^:\n]{1,20}\s:\s/gm, '')
+    .replace(/\s+\/\s+/g, '\n')
+    .replace(/[|ㅣ¦]/g, ' ')
+    .replace(/：/g, ':')
+    .replace(/[0-9OoIl]{3}[-.\s]?[0-9OoIl]{3,4}[-.\s]?[0-9OoIl]{4}/g,
+      m => (m.replace(/\D/g, '').length >= 7 ? m.replace(/[Oo]/g, '0').replace(/[Il]/g, '1') : m))
+    .replace(/[ \t]+/g, ' ');
+}
+
+/* 글자에서 사람 이름(2~4글자)을 골라요 */
+function pickName(s) {
+  const words = String(s || '').replace(PHONE_RE, ' ').split(/[^가-힣]+/).filter(Boolean);
+  for (let w of words) {
+    w = w.replace(/(?:고객님|님|씨|입니다|이에요|예요|이고|이요)$/, '');
+    if (w.length >= 2 && w.length <= 4 && !NOT_NAME_RE.test(w)) return w;
+  }
+  return '';
+}
+
+function parseOrderText(raw) {
+  const lines = cleanText(raw).split('\n').map(s => s.trim()).filter(Boolean);
+  const rest = [...lines];                       // 주소를 뺀 나머지 글자 (이름·사과 종류·개수 찾을 때 써요)
   const r = {};
-  const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
-  const phoneRe = /(01[016789]|0[2-6]\d?)[-.\s]?\d{3,4}[-.\s]?\d{4}/;
-  const labeled = re => {
-    for (const l of lines) { const m = l.match(re); if (m) return m[1].trim(); }
-    return '';
+  const isSender = i => SENDER_RE.test(lines[i]);
+  // 이름표가 붙은 줄 찾기 → { value, line }. 이름표 뒤가 비어 있으면 다음 줄 값을 써요
+  const findLabel = (re, skipSender = true) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (skipSender && isSender(i)) continue;
+      const m = lines[i].match(re);
+      if (!m) continue;
+      if (m[1].trim()) return { value: m[1].trim(), line: i };
+      if (i + 1 < lines.length) return { value: lines[i + 1], line: i + 1 };
+    }
+    return null;
   };
-  const stripPhone = s => s.replace(new RegExp(phoneRe.source, 'g'), '').replace(/\s{2,}/g, ' ').trim();
 
-  const phone = text.match(phoneRe);
-  if (phone) r.phone = formatPhone(phone[0]);
+  // ── 주소 ── (주소 뒤에 붙은 사과 종류·전화번호·메모는 잘라내요)
+  let addrLine = -1, full = '', before = '';
+  const la = findLabel(ADDR_LABEL);
+  if (la) { full = la.value; addrLine = la.line; }
+  if (!full) {
+    addrLine = lines.findIndex((l, i) => !isSender(i) && REGION_RE.test(l) && ADDR_WORD_RE.test(l));
+    if (addrLine < 0) addrLine = lines.findIndex((l, i) => !isSender(i) && CITY_RE.test(l));
+    if (addrLine >= 0) {
+      const l = lines[addrLine];
+      const at = REGION_RE.test(l) && ADDR_WORD_RE.test(l) ? l.search(REGION_RE) : l.search(CITY_RE);
+      before = l.slice(0, at);
+      full = l.slice(at);
+    }
+  }
+  if (full) {
+    const stop = full.search(ADDR_STOP_RE);
+    let addr = stop > 0 ? full.slice(0, stop) : full;
+    rest[addrLine] = `${before} ${stop > 0 ? full.slice(stop) : ''}`;
+    const zip = addr.match(/\(?(?<!\d)(\d{5})(?!\d)\)?/);
+    if (zip) { r.zip = zip[1]; addr = addr.replace(zip[0], ' '); }
+    addr = addr.replace(/\s{2,}/g, ' ').replace(/[\s,/·:-]+$/, '').trim();
+    const { base, detail } = splitAddress(addr);
+    r.addr = base;
+    r.addr2 = detail;
+    const next = lines[addrLine + 1];
+    if (!r.addr2 && next && next.length < 40 && DETAIL_RE.test(next) && !PHONE_ONE.test(next)
+        && !/박스|상자|kg|키로/i.test(next) && !NAME_LABEL.test(next)) {
+      r.addr2 = next;
+      rest[addrLine + 1] = '';
+    }
+  }
 
-  r.name = stripPhone(labeled(/^(?:받는\s*(?:분|사람|이)|수령인|수취인|이름|성함|성명)\s*[:：)]?\s*(.+)$/)).replace(/\s*님$/, '');
-  if (!r.name) {
-    const m = text.match(/([가-힣]{2,4})\s*(?:님)?\s*[,/]?\s*(?:01[016789]|0[2-6])/);
-    if (m) r.name = m[1];
-  }
-  if (!r.name) {
-    const l = lines.find(l => /^[가-힣]{2,4}(?:\s*님)?$/.test(l) && !/박스|상자|사과|부사|홍로|감홍|양광|홍옥|아리수/.test(l));
-    if (l) r.name = l.replace(/\s*님$/, '');
-  }
-
-  let addr = labeled(/^(?:주소|배송지|받는\s*주소)\s*[:：)]?\s*(.+)$/);
-  if (!addr) {
-    const region = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|충청|전북|전남|전라|경북|경남|경상|제주)[가-힣]*\s+[가-힣]/;
-    const l = lines.find(l => region.test(l));
-    if (l) addr = l.slice(l.search(region));
-  }
-  if (addr) {
-    addr = stripPhone(addr);
-    const zip = addr.match(/\(?\b(\d{5})\b\)?/);
-    if (zip) { r.zip = zip[1]; addr = addr.replace(zip[0], '').trim(); }
-    const parts = splitAddress(addr);
-    r.addr = parts.base;
-    r.addr2 = parts.detail;
+  // ── 우편번호 ──
+  if (!r.zip) {
+    const lz = findLabel(ZIP_LABEL, false);
+    const m = lz && lz.value.match(/(?<!\d)\d{5}(?!\d)/);
+    if (m) r.zip = m[0];
   }
   if (!r.zip) {
-    const zip = text.match(/우편\s*번호\s*[:：]?\s*(\d{5})/);
-    if (zip) r.zip = zip[1];
+    const only = lines.find(l => /^\(?\d{5}\)?$/.test(l));
+    if (only) r.zip = only.replace(/\D/g, '');
   }
 
-  const varieties = { '부사(후지)': /부사|후지/, '홍로': /홍로/, '감홍': /감홍/, '시나노골드': /시나노\s*골드/, '아리수': /아리수/, '양광': /양광/, '홍옥': /홍옥/ };
-  for (const [v, re] of Object.entries(varieties)) { if (re.test(text)) { r.variety = v; break; } }
+  // ── 이름 ──
+  let nameLine = -1;
+  const setName = (name, i) => { if (!r.name && name) { r.name = name; nameLine = i; } };
+  const ln = findLabel(NAME_LABEL);
+  if (ln) setName(pickName(ln.value), ln.line);
+  rest.forEach((l, i) => {                       // "김영희 고객님"
+    const m = !isSender(i) && l.match(/([가-힣]{2,4})\s*(?:고객)?님/);
+    if (m) setName(pickName(m[1]), i);
+  });
+  rest.forEach((l, i) => {                       // "홍길동 010-1234-5678"
+    if (!isSender(i) && PHONE_ONE.test(l)) setName(pickName(l.split(PHONE_ONE)[0]), i);
+  });
+  rest.forEach((l, i) => {                       // 이름만 있는 줄
+    if (/^[가-힣]{2,4}(?:\s*(?:고객)?님)?$/.test(l)) setName(pickName(l), i);
+  });
+  rest.forEach((l, i) => {                       // "홍길동이에요" · "홍길동입니다"
+    const m = l.match(/(?<![가-힣])([가-힣]{2,4})(?:이에요|예요|입니다)(?![가-힣])/);
+    if (m) setName(pickName(m[1]), i);
+  });
+  lines.forEach((l, i) => {                      // 마지막으로 "주문자: 홍길동"
+    if (/주문자/.test(l)) setName(pickName(l.replace(/주문자/, '')), i);
+  });
 
-  const w = text.match(/(\d+(?:\.\d+)?)\s*(?:kg|키로|킬로)/i);
+  // ── 전화번호 ──
+  const phones = [];
+  lines.forEach((l, i) => { for (const m of l.matchAll(PHONE_RE)) phones.push({ phone: formatPhone(m[0]), line: i }); });
+  const pick = phones.find(p => p.line === nameLine)
+    || phones.find(p => RECIP_RE.test(lines[p.line]) && !isSender(p.line))
+    || phones.find(p => PHONE_LABEL.test(lines[p.line]) && !isSender(p.line))
+    || phones.find(p => !isSender(p.line))
+    || phones[0];
+  if (pick) r.phone = pick.phone;
+  r.phoneCount = new Set(phones.map(p => p.phone)).size;
+
+  // ── 사과 종류 · 개수 · 무게 ──
+  const restText = rest.join('\n');
+  const lv = findLabel(VARIETY_LABEL, false);
+  const varietyText = (lv ? lv.value + '\n' : '') + restText;
+  for (const [v, re] of VARIETY_RE) { if (re.test(varietyText)) { r.variety = v; break; } }
+
+  const lq = findLabel(QTY_LABEL, false);
+  const qtyText = (lq ? lq.value + '\n' : '') + restText;
+  let q = qtyText.match(/(\d+)\s*(박스|상자|box)/i);
+  if (q) { r.qty = +q[1]; r.unit = '박스'; }
+  if (!q && (q = qtyText.match(/(?<![가-힣])(한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열)\s*(박스|상자|개(?![월수]))/))) {
+    r.qty = KO_NUM[q[1]]; r.unit = q[2] === '개' ? '개' : '박스';
+  }
+  if (!q && (q = qtyText.match(/(\d+)\s*개(?![월수])/))) { r.qty = +q[1]; r.unit = '개'; }
+  if (!q && lq && (q = lq.value.match(/^(\d+)/))) { r.qty = +q[1]; r.unit = '박스'; }
+  if (r.qty && (r.qty < 1 || r.qty > 999)) delete r.qty;
+
+  const w = restText.match(/(\d+(?:\.\d+)?)\s*(?:kg|㎏|키로|킬로)/i);
   if (w) r.weight = `${w[1]}kg`;
 
-  const q = text.match(/(\d+)\s*(박스|상자|box|개|과)(?![가-힣])/i);
-  if (q) { r.qty = parseInt(q[1], 10); r.unit = /개|과/.test(q[2]) ? '개' : '박스'; }
-
-  const memo = labeled(/^(?:배송\s*메모|요청\s*사항|요청|메모|부탁)\s*[:：)]?\s*(.+)$/);
-  if (memo) r.memo = memo;
+  // ── 배송 메모 ── (이름표가 없으면 "경비실에 맡겨주세요" 같은 부분을 찾아요)
+  const lm = findLabel(MEMO_LABEL, false);
+  if (lm) r.memo = lm.value;
+  else {
+    for (const l of rest) {
+      const part = l.split(/[,.!]|\s{2,}/).flatMap(s => s.split(PHONE_ONE)).find(s => MEMO_HINT_RE.test(s));
+      if (part) { r.memo = part.trim(); break; }
+    }
+  }
+  if (r.memo) r.memo = r.memo.slice(0, 80);
   return r;
 }
 
-function applyParsed() {
-  const text = $('#pasteText').value.trim();
-  if (!text) { toast('주문 문자를 먼저 붙여넣어 주세요', 'error'); return; }
-  const r = parseOrderText(text);
-  let n = 0;
-  const put = (sel, v) => { if (v) { $(sel).value = v; n++; } };
-  put('#toName', r.name);
-  put('#toPhone', r.phone);
-  put('#toAddr', r.addr);
-  put('#toAddr2', r.addr2);
-  put('#toZip', r.zip);
-  put('#memo', r.memo);
-  if (r.variety) { setChoice('variety', r.variety); n++; }
-  if (r.weight) { setChoice('weight', r.weight); n++; }
-  if (r.qty) { $('#qty').value = r.qty; setChoice('unit', r.unit); n++; }
-  if (r.memo || r.weight) $('#moreBox').open = true;
-  $$('.invalid').forEach(el => el.classList.remove('invalid'));
-  toast(n ? `${n}개 항목을 채웠어요. 맞는지 한 번 확인해주세요!` : '알아볼 수 있는 내용이 없어요. 직접 입력해주세요', n ? '' : 'error');
+/* =========================================================
+   주문 자동 인식 ② 인식 결과를 입력칸에 채우고 우편번호까지 찾기
+   ========================================================= */
+const RECOG_ITEMS = [
+  ['name', '이름', '#toName'],
+  ['phone', '전화번호', '#toPhone'],
+  ['variety', '사과 종류', '#varietyChips'],
+  ['qty', '개수', '#qty'],
+  ['addr', '주소', '#toAddr'],
+  ['zip', '우편번호', '#toZip'],
+];
+function showRecogResult(r, zipState) {
+  $$('.missing').forEach(el => el.classList.remove('missing'));
+  const value = {
+    name: r.name,
+    phone: r.phone,
+    variety: r.variety,
+    qty: r.qty ? `${r.qty}${r.unit}` : '',
+    addr: [r.addr, r.addr2].filter(Boolean).join(' '),
+    zip: r.zip,
+  };
+  const missing = [];
+  $('#recogResult').innerHTML = RECOG_ITEMS.map(([key, label, sel]) => {
+    let cls = value[key] ? 'ok' : 'miss';
+    let text = value[key] || (key === 'qty' ? '못 찾음 → 1박스' : '못 찾음');
+    if (key === 'zip' && !value.zip && zipState === 'searching') { cls = 'wait'; text = '찾는 중…'; }
+    if (cls === 'miss') { missing.push(sel); $(sel).classList.add('missing'); }
+    const icon = { ok: '✅', miss: '⚠️', wait: '⏳' }[cls];
+    return `<li class="${cls}"><span>${icon} ${label}</span><b title="${esc(text)}">${esc(text)}</b></li>`;
+  }).join('');
+  $('#recogResult').hidden = false;
+  return missing;
+}
+
+let recognizing = false;
+async function recognizeFromText() {
+  const raw = $('#pasteText').value.trim();
+  if (!raw) { toast('주문 문자를 붙여넣거나 사진을 넣어주세요', 'error'); return; }
+  if (recognizing) return;
+  recognizing = true;
+  try {
+    const r = parseOrderText(raw);
+    // 새 주문으로 채워요 (못 찾은 칸은 비워서 직접 확인하게 해요)
+    $('#toName').value = r.name || '';
+    $('#toPhone').value = r.phone || '';
+    $('#toAddr').value = r.addr || '';
+    $('#toAddr2').value = r.addr2 || '';
+    $('#toZip').value = r.zip || '';
+    $('#memo').value = r.memo || '';
+    $('#qty').value = r.qty || 1;
+    setChoice('variety', r.variety || '');
+    setChoice('unit', r.unit || '박스');
+    setChoice('weight', r.weight || '');
+    if (r.memo || r.weight) $('#moreBox').open = true;
+    $$('.invalid').forEach(el => el.classList.remove('invalid'));
+
+    if (r.addr && !r.zip) {
+      showRecogResult(r, 'searching');
+      if (await findZip()) {
+        r.zip = $('#toZip').value;
+        r.addr = $('#toAddr').value;
+        r.addr2 = $('#toAddr2').value;
+      }
+    }
+    const missing = showRecogResult(r);
+    if (r.phoneCount > 1) toast('전화번호가 여러 개 있어요. 받는 분 번호가 맞는지 확인해주세요', 'error');
+    else if (!missing.length) {
+      toast('✅ 6가지 모두 인식했어요! 맞는지 보고 확인을 눌러주세요');
+      $('#btnConfirm').classList.add('pulse');
+      setTimeout(() => $('#btnConfirm').classList.remove('pulse'), 2400);
+    } else toast(`⚠️ 노란 칸(${missing.length}개)을 확인해서 채워주세요`, 'error');
+  } finally {
+    recognizing = false;
+  }
+}
+
+/* =========================================================
+   주문 자동 인식 ③ 사진·캡처에서 글자 읽기 (OCR)
+   처음 한 번 인터넷에서 한글 글자 데이터를 받아요 (이후엔 기억해요)
+   ========================================================= */
+const TESSERACT_URL = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+let ocrWorker = null;
+let ocrBusy = false;
+let ocrPass = 0;
+let ocrPasses = 1;
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => { s.remove(); reject(new Error(`불러오기 실패: ${src}`)); };
+    document.head.appendChild(s);
+  });
+}
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+function ocrProgress(msg, ratio) {
+  $('#ocrProgress').hidden = false;
+  $('#ocrMsg').textContent = msg;
+  $('#ocrBar').style.width = `${Math.round(Math.min(1, ratio) * 100)}%`;
+}
+function ocrLogger(m) {
+  if (m.status === 'recognizing text') ocrProgress(`글자 읽는 중… (${ocrPass + 1}/${ocrPasses})`, 0.1 + 0.9 * (ocrPass + m.progress) / ocrPasses);
+  else if (/traineddata/.test(m.status)) ocrProgress('한글 글자 데이터 받는 중… (처음 한 번만)', 0.1 * m.progress);
+}
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  if (!window.Tesseract) await loadScript(TESSERACT_URL);
+  const worker = await Tesseract.createWorker('kor+eng', 1, { logger: ocrLogger });
+  await worker.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
+  ocrWorker = worker;
+  return worker;
+}
+
+/* 사진을 흑백으로 바꿔 글자만 또렷하게 남겨요
+   - adaptive: 주변보다 어두운 곳만 글자로 (카톡 캡처처럼 배경색이 있을 때)
+   - otsu: 전체 기준 하나로 나누기 (흰 종이 주문서)
+   두 방법 모두 표의 긴 줄은 지워요 */
+function binarize(img, mode) {
+  const scale = Math.min(3, 2000 / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h);
+  const px = d.data;
+  const n = w * h;
+  const gray = new Uint8Array(n);
+  for (let i = 0; i < n; i++) gray[i] = (px[i * 4] * 0.299 + px[i * 4 + 1] * 0.587 + px[i * 4 + 2] * 0.114) | 0;
+
+  const ink = new Uint8Array(n);                // 1 = 글자
+  if (mode === 'adaptive') {
+    const r = Math.max(7, Math.round(Math.min(w, h) / 50));
+    const W1 = w + 1;
+    const sum = new Float64Array(W1 * (h + 1));
+    for (let y = 0; y < h; y++) {
+      let row = 0;
+      for (let x = 0; x < w; x++) { row += gray[y * w + x]; sum[(y + 1) * W1 + x + 1] = sum[y * W1 + x + 1] + row; }
+    }
+    for (let y = 0; y < h; y++) {
+      const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+      for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+        const mean = (sum[y1 * W1 + x1] - sum[y0 * W1 + x1] - sum[y1 * W1 + x0] + sum[y0 * W1 + x0]) / ((x1 - x0) * (y1 - y0));
+        ink[y * w + x] = gray[y * w + x] < mean - 12 ? 1 : 0;
+      }
+    }
+  } else {
+    const hist = new Array(256).fill(0);
+    for (let i = 0; i < n; i++) hist[gray[i]]++;
+    let total = 0;
+    for (let t = 0; t < 256; t++) total += t * hist[t];
+    let sumB = 0, wB = 0, best = 0, th = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t];
+      if (!wB) continue;
+      const wF = n - wB;
+      if (!wF) break;
+      sumB += t * hist[t];
+      const between = wB * wF * (sumB / wB - (total - sumB) / wF) ** 2;
+      if (between > best) { best = between; th = t; }
+    }
+    let dark = 0;
+    for (let i = 0; i < n; i++) { ink[i] = gray[i] < th ? 1 : 0; dark += ink[i]; }
+    if (dark > n / 2) for (let i = 0; i < n; i++) ink[i] ^= 1;   // 어두운 배경이면 뒤집기
+  }
+
+  // 표·밑줄 같은 긴 선 지우기
+  const minRun = Math.round(Math.min(w, h) * 0.25);
+  const erase = new Uint8Array(n);
+  for (let y = 0; y < h; y++) {
+    let run = 0;
+    for (let x = 0; x <= w; x++) {
+      if (x < w && ink[y * w + x]) run++;
+      else { if (run >= minRun) for (let k = x - run; k < x; k++) erase[y * w + k] = 1; run = 0; }
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let run = 0;
+    for (let y = 0; y <= h; y++) {
+      if (y < h && ink[y * w + x]) run++;
+      else { if (run >= minRun / 2) for (let k = y - run; k < y; k++) erase[k * w + x] = 1; run = 0; }
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const v = ink[i] && !erase[i] ? 0 : 255;
+    px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = v;
+    px[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(d, 0, 0);
+  return c;
+}
+
+/* 사진 인식 결과에서 의미 없는 잡음 줄을 지워요 */
+const tidyOcrText = text => text.split('\n')
+  .map(l => l.replace(/\s{2,}/g, ' ').trim())
+  .filter(l => /[가-힣0-9]{2,}/.test(l))
+  .join('\n');
+
+async function recognizeImage(file) {
+  if (!file || !/^image\//.test(file.type)) { toast('사진·캡처 같은 그림 파일만 넣을 수 있어요', 'error'); return; }
+  if (ocrBusy) { toast('지금 다른 사진을 읽고 있어요. 잠시만요'); return; }
+  ocrBusy = true;
+  $('#recogBox').classList.add('busy');
+  $('#recogResult').hidden = true;
+  const url = URL.createObjectURL(file);
+  $('#ocrThumb').src = url;
+  ocrProgress('글자 인식 준비 중…', 0.02);
+  try {
+    const img = await loadImage(url);
+    const worker = await getOcrWorker();
+    const modes = ['adaptive', 'otsu'];
+    ocrPasses = modes.length;
+    let best = null;
+    for (ocrPass = 0; ocrPass < modes.length; ocrPass++) {
+      const { data } = await worker.recognize(binarize(img, modes[ocrPass]));
+      if (!best || data.confidence > best.confidence) best = data;
+      if (best.confidence >= 85) break;      // 충분히 잘 읽혔으면 그만
+    }
+    ocrProgress('다 읽었어요! 정보를 찾는 중…', 1);
+    $('#pasteText').value = tidyOcrText(best.text);
+    if (!$('#pasteText').value) { toast('사진에서 글자를 찾지 못했어요. 더 선명한 사진으로 해주세요', 'error'); return; }
+    if (best.confidence < 60) toast('글씨가 흐릿해서 틀린 곳이 있을 수 있어요. 꼭 확인해주세요', 'error');
+    await recognizeFromText();
+  } catch (e) {
+    console.error(e);
+    toast('사진 인식은 인터넷 연결이 필요해요 (처음 한 번 글자 데이터를 받아요)', 'error');
+  } finally {
+    ocrBusy = false;
+    $('#recogBox').classList.remove('busy');
+    setTimeout(() => { $('#ocrProgress').hidden = true; URL.revokeObjectURL(url); }, 1500);
+  }
 }
 
 /* =========================================================
@@ -1251,7 +1644,33 @@ function init() {
   $('#btnConfirm').addEventListener('click', onConfirm);
   $('#btnReset').addEventListener('click', () => { if (confirm('입력한 내용을 지울까요?')) resetForm(); });
   $('#btnCancelEdit').addEventListener('click', resetForm);
-  $('#btnParse').addEventListener('click', applyParsed);
+  // 주문 자동 인식: 글자 붙여넣기 · 캡처 붙여넣기 · 사진 끌어다 놓기 · 사진 고르기
+  $('#btnParse').addEventListener('click', recognizeFromText);
+  $('#btnImage').addEventListener('click', () => $('#imgInput').click());
+  $('#imgInput').addEventListener('change', e => { recognizeImage(e.target.files[0]); e.target.value = ''; });
+  document.addEventListener('paste', e => {
+    const file = [...(e.clipboardData?.files || [])].find(f => /^image\//.test(f.type));
+    if (file) { e.preventDefault(); recognizeImage(file); return; }
+    const box = $('#pasteText');
+    if (e.target === box) { setTimeout(recognizeFromText, 0); return; }
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    const text = e.clipboardData?.getData('text') || '';
+    if (text.trim()) { e.preventDefault(); box.value = text; recognizeFromText(); }
+  });
+  const recogBox = $('#recogBox');
+  let dragDepth = 0;
+  document.addEventListener('dragenter', e => { e.preventDefault(); dragDepth++; recogBox.classList.add('drag'); });
+  document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; recogBox.classList.remove('drag'); } });
+  document.addEventListener('dragover', e => e.preventDefault());   // 사진을 놓아도 다른 화면으로 넘어가지 않게
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    dragDepth = 0;
+    recogBox.classList.remove('drag');
+    const file = [...(e.dataTransfer?.files || [])].find(f => /^image\//.test(f.type));
+    if (file) { recogBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); recognizeImage(file); return; }
+    const text = e.dataTransfer?.getData('text') || '';
+    if (text.trim()) { $('#pasteText').value = text; recognizeFromText(); }
+  });
   $('#btnZip').addEventListener('click', () => {
     if (!$('#toAddr').value.trim()) { toast('주소를 먼저 입력해주세요', 'error'); $('#toAddr').focus(); return; }
     findZip();
@@ -1265,7 +1684,7 @@ function init() {
   ['#toPhone', '#fromPhone'].forEach(s => $(s).addEventListener('blur', e => { e.target.value = formatPhone(e.target.value); }));
   $('#toAddr').addEventListener('input', () => { $('#toZip').value = ''; });  // 주소가 바뀌면 우편번호를 다시 찾아요
   $('#toZip').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 5); });
-  $$('#formCard input').forEach(el => el.addEventListener('input', () => el.classList.remove('invalid')));
+  $$('#formCard input').forEach(el => el.addEventListener('input', () => el.classList.remove('invalid', 'missing')));
   ['#fromName', '#fromPhone', '#fromAddr'].forEach(s => $(s).addEventListener('change', saveSender));
   ['#paper', '#perBox', '#autoPdf'].forEach(s => $(s).addEventListener('change', saveSettings));
 
