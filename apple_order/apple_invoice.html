@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>사과 송장 만들기</title>
+<!-- 휴대폰에 앱으로 설치 → 문자 앱의 "공유" 목록에 「사과 송장」이 나와요 -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#D7263D">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="사과 송장">
 <!-- 우편번호 찾기 (카카오/다음 우편번호 서비스, 무료·키 필요 없음) -->
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js" async></script>
 <style id="pageStyle"></style>
@@ -161,6 +167,16 @@
   .recog textarea { min-height: 120px; }
   .recog-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 8px; }
   .recog-btns .btn { white-space: normal; padding: 11px 8px; }
+  .recog-sub { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .recog-sub .btn { flex: 1 1 auto; white-space: normal; }
+  .share-help { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; font-size: 15px; }
+  .share-help ol { margin: 6px 0 10px; padding-left: 22px; }
+  .share-h { font-weight: 800; margin: 14px 0 0; }
+  .share-h:first-of-type { margin-top: 0; }
+  .share-help li { margin-bottom: 4px; }
+  .share-help > .btn { width: 100%; margin-bottom: 12px; padding: 13px; }
+  .share-warn { background: #FFF4D6; border: 1px solid #F2D58A; border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+  .share-ok { background: var(--leaf-soft); color: #1f6b41; border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; font-weight: 700; }
   .ocr-progress { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
   .ocr-progress img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
   .ocr-bar-wrap { flex: 1; min-width: 0; }
@@ -336,8 +352,33 @@
       </div>
       <textarea id="pasteText" placeholder="여기에 붙여넣기 (Ctrl+V)&#10;&#10;예) 홍길동 010-1234-5678&#10;서울 강남구 테헤란로 123 101동 202호&#10;부사 2박스&#10;&#10;카톡 캡처나 주문서 사진은 여기로 끌어다 놓아도 돼요"></textarea>
       <div class="recog-btns">
+        <button type="button" class="btn green" id="btnClipboard">📋 복사한 문자 붙여넣기</button>
         <button type="button" class="btn" id="btnImage">📷 사진·캡처 불러오기</button>
-        <button type="button" class="btn green" id="btnParse">✨ 다시 인식하기</button>
+      </div>
+      <div class="recog-sub">
+        <button type="button" class="btn small" id="btnParse">✨ 다시 인식하기</button>
+        <button type="button" class="btn small" id="btnShareHelp" aria-expanded="false">📩 문자 앱에서 바로 보내기</button>
+      </div>
+      <div class="share-help" id="shareHelp" hidden>
+        <p class="share-warn" id="shareFileWarn" hidden>
+          ⚠️ 지금은 컴퓨터 파일로 열려 있어서 이 기능을 쓸 수 없어요.<br>
+          휴대폰에서 <b>인터넷 주소(https://…)</b>로 열어주세요.
+        </p>
+        <p class="share-ok" id="shareInstalled" hidden>✅ 앱으로 설치돼 있어요. 문자 앱에서 공유만 누르면 돼요!</p>
+        <button type="button" class="btn primary" id="btnInstall" hidden>📲 휴대폰에 앱으로 설치하기</button>
+        <p class="share-h">안드로이드 (갤럭시 등)</p>
+        <ol>
+          <li>휴대폰 <b>크롬</b>에서 이 화면을 열고 앱으로 설치하기<br>(크롬 메뉴 <b>⋮ → 홈 화면에 추가 → 설치</b>)</li>
+          <li>문자 앱에서 주문 문자를 <b>길게 누르기 → 공유</b></li>
+          <li>목록에서 <b>🍎 사과 송장</b>을 누르면 앱이 열리면서 <b>자동으로 인식</b>돼요</li>
+        </ol>
+        <p class="hint">카톡 대화나 주문 사진도 똑같이 <b>공유 → 사과 송장</b>으로 보낼 수 있어요.</p>
+        <p class="share-h">아이폰</p>
+        <ol>
+          <li>주문 문자를 <b>길게 눌러 복사</b></li>
+          <li>이 화면에서 <b>📋 복사한 문자 붙여넣기</b>를 누르면 바로 인식돼요</li>
+        </ol>
+        <p class="hint">아이폰은 다른 앱의 공유 목록에 웹 앱을 넣을 수 없어서 복사·붙여넣기로 보내요.</p>
       </div>
       <input type="file" id="imgInput" accept="image/*" hidden>
       <div class="ocr-progress" id="ocrProgress" hidden>
@@ -758,7 +799,7 @@ const SENDER_RE = /보내는|보낸\s*(?:이|분|사람)|주문자|발송인|입
 const RECIP_RE = /받는|받으실|수령|수취/;
 const MEMO_HINT_RE = /맡겨|문\s*앞|경비실|부재\s*시|놓아|놔\s*주|연락\s*(?:주|부탁)|전화\s*(?:주|부탁)|초인종|벨\s/;
 const ADDR_STOP_RE = new RegExp([PHONE_RE.source, '부사|후지|홍로|감홍|시나노|아리수|양광|홍옥', '\\d+\\s*(?:박스|상자|kg|㎏|키로)', MEMO_HINT_RE.source, '\\s[가-힣]{2,4}\\s*(?:고객)?님'].join('|'), 'i');
-const NOT_NAME_RE = /안녕|감사|주문|사과|박스|상자|부사|후지|홍로|감홍|양광|홍옥|아리수|시나노|주소|전화|연락|배송|고객|문의|입금|계좌|택배|선물|요청|메모|이름|성함|성명|받는|보내|수령|수취|부탁|번호|종류|개수|수량|우편|휴대|핸드|드려|합니다|해요|주세요|입니다|세요|에요|예요|감홍|경비|아파트/;
+const NOT_NAME_RE = /발신|광고|안녕|감사|주문|사과|박스|상자|부사|후지|홍로|감홍|양광|홍옥|아리수|시나노|주소|전화|연락|배송|고객|문의|입금|계좌|택배|선물|요청|메모|이름|성함|성명|받는|보내|수령|수취|부탁|번호|종류|개수|수량|우편|휴대|핸드|드려|합니다|해요|주세요|입니다|세요|에요|예요|감홍|경비|아파트/;
 
 const labelRe = words => new RegExp(`^\\s*(?:${words})\\s*[:)\\]>.=-]*\\s*(.*)$`, 'i');
 const NAME_LABEL = labelRe('(?:받는|받으실|수령|수취)\\s*(?:분|사람|이|인|자)?\\s*(?:이름|성함|성명)?(?![가-힣]*\\s*:?\\s*(?:주소|전화|연락|휴대|핸드|번호|우편|곳))|이름|성함|성명|고객\\s*명');
@@ -775,6 +816,7 @@ function cleanText(raw) {
     .replace(/\r/g, '')
     .replace(/^\[[^\]\n]{1,20}\]\s*\[(?:오전|오후)\s*\d{1,2}:\d{2}\]\s*/gm, '')
     .replace(/^\d{4}[.년]\s*\d{1,2}[.월]\s*\d{1,2}[.일]?\s*(?:오전|오후)?\s*\d{1,2}:\d{2},?\s*[^:\n]{1,20}\s:\s/gm, '')
+    .replace(/\[\s*(?:web|국외|국제)?\s*발신\s*\]|\(광고\)/gi, '\n')
     .replace(/\s+\/\s+/g, '\n')
     .replace(/[|ㅣ¦]/g, ' ')
     .replace(/：/g, ':')
@@ -784,8 +826,9 @@ function cleanText(raw) {
 }
 
 /* 글자에서 사람 이름(2~4글자)을 골라요 */
-function pickName(s) {
+function pickName(s, fromEnd = false) {
   const words = String(s || '').replace(PHONE_RE, ' ').split(/[^가-힣]+/).filter(Boolean);
+  if (fromEnd) words.reverse();
   for (let w of words) {
     w = w.replace(/(?:고객님|님|씨|입니다|이에요|예요|이고|이요)$/, '');
     if (w.length >= 2 && w.length <= 4 && !NOT_NAME_RE.test(w)) return w;
@@ -863,7 +906,7 @@ function parseOrderText(raw) {
     if (m) setName(pickName(m[1]), i);
   });
   rest.forEach((l, i) => {                       // "홍길동 010-1234-5678"
-    if (!isSender(i) && PHONE_ONE.test(l)) setName(pickName(l.split(PHONE_ONE)[0]), i);
+    if (!isSender(i) && PHONE_ONE.test(l)) setName(pickName(l.split(PHONE_ONE)[0], true), i);
   });
   rest.forEach((l, i) => {                       // 이름만 있는 줄
     if (/^[가-힣]{2,4}(?:\s*(?:고객)?님)?$/.test(l)) setName(pickName(l), i);
@@ -1633,6 +1676,102 @@ function exportCSV() {
 }
 
 /* =========================================================
+   문자 앱에서 바로 보내기 (휴대폰 앱 설치 + 공유받기)
+   ========================================================= */
+const SHARE_CACHE = 'apple-invoice-share';   // sw.js 와 같은 이름
+let installPrompt = null;
+
+function setupApp() {
+  const isWeb = /^https?:$/.test(location.protocol);
+  $('#shareFileWarn').hidden = isWeb;
+  if (isWeb && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('서비스 워커 등록 실패', e));
+  }
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('#shareInstalled').hidden = !standalone;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    installPrompt = e;
+    $('#btnInstall').hidden = false;
+  });
+  window.addEventListener('appinstalled', () => {
+    installPrompt = null;
+    $('#btnInstall').hidden = true;
+    $('#shareInstalled').hidden = false;
+    toast('📲 설치됐어요! 이제 문자 앱에서 공유 → 사과 송장을 눌러보세요');
+  });
+}
+async function installApp() {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => null);
+  installPrompt = null;
+  $('#btnInstall').hidden = true;
+}
+
+/* 공유로 받은 문자·사진(sw.js 가 저장해 둔 것) 또는 주소의 ?text= 를 바로 인식해요 */
+async function receiveShared() {
+  const params = new URLSearchParams(location.search);
+  let text = params.get('text') || params.get('body') || '';
+  let image = null;
+  if (params.has('shared') && 'caches' in window) {
+    try {
+      const cache = await caches.open(SHARE_CACHE);
+      const key = name => new URL(name, location.href).href;
+      const t = await cache.match(key('shared-text'));
+      if (t) text = await t.text();
+      const im = await cache.match(key('shared-image'));
+      if (im) {
+        const blob = await im.blob();
+        image = new File([blob], 'shared-image', { type: blob.type || im.headers.get('Content-Type') || 'image/png' });
+      }
+      await cache.delete(key('shared-text'));
+      await cache.delete(key('shared-image'));
+    } catch (e) {
+      console.warn('공유받은 내용 읽기 실패', e);
+    }
+  }
+  if (params.has('shared') || params.has('text') || params.has('body')) history.replaceState(null, '', location.pathname);
+  if (image) {
+    toast('📩 받은 사진을 읽을게요');
+    await recognizeImage(image);
+  } else if (text.trim()) {
+    $('#pasteText').value = text;
+    toast('📩 받은 문자를 인식할게요');
+    await recognizeFromText();
+  } else if (params.has('shared')) {
+    toast('받은 내용이 비어 있어요. 다시 공유해주세요', 'error');
+  }
+}
+
+/* 📋 복사해 둔 문자(또는 캡처)를 버튼 한 번으로 붙여넣고 인식해요 */
+async function pasteFromClipboard() {
+  try {
+    if (navigator.clipboard?.read) {
+      for (const item of await navigator.clipboard.read()) {
+        const imageType = item.types.find(t => t.startsWith('image/'));
+        if (imageType) {
+          const blob = await item.getType(imageType);
+          await recognizeImage(new File([blob], 'clipboard-image', { type: imageType }));
+          return;
+        }
+        if (item.types.includes('text/plain')) {
+          const text = await (await item.getType('text/plain')).text();
+          if (text.trim()) { $('#pasteText').value = text; await recognizeFromText(); return; }
+        }
+      }
+    } else {
+      const text = await navigator.clipboard.readText();
+      if (text.trim()) { $('#pasteText').value = text; await recognizeFromText(); return; }
+    }
+    toast('복사한 문자가 없어요. 주문 문자를 먼저 길게 눌러 복사해주세요', 'error');
+  } catch (e) {
+    toast('붙여넣기 허용이 필요해요. 위 칸을 길게 눌러 「붙여넣기」 해도 돼요', 'error');
+    $('#pasteText').focus();
+  }
+}
+
+/* =========================================================
    버튼 연결
    ========================================================= */
 function init() {
@@ -1647,6 +1786,13 @@ function init() {
   // 주문 자동 인식: 글자 붙여넣기 · 캡처 붙여넣기 · 사진 끌어다 놓기 · 사진 고르기
   $('#btnParse').addEventListener('click', recognizeFromText);
   $('#btnImage').addEventListener('click', () => $('#imgInput').click());
+  $('#btnClipboard').addEventListener('click', pasteFromClipboard);
+  $('#btnInstall').addEventListener('click', installApp);
+  $('#btnShareHelp').addEventListener('click', e => {
+    const help = $('#shareHelp');
+    help.hidden = !help.hidden;
+    e.currentTarget.setAttribute('aria-expanded', String(!help.hidden));
+  });
   $('#imgInput').addEventListener('change', e => { recognizeImage(e.target.files[0]); e.target.value = ''; });
   document.addEventListener('paste', e => {
     const file = [...(e.clipboardData?.files || [])].find(f => /^image\//.test(f.type));
@@ -1733,6 +1879,8 @@ function init() {
   $('#btnBulkDel').addEventListener('click', () => deleteOrders(selectedOrders()));
 
   if (!store.set('appleInvoice.test', 1)) toast('이 브라우저는 주문을 기억하지 못해요. 엑셀 저장을 꼭 해주세요', 'error');
+  setupApp();
+  receiveShared();
 }
 init();
 </script>
