@@ -174,7 +174,7 @@
   .share-h { font-weight: 800; margin: 14px 0 0; }
   .share-h:first-of-type { margin-top: 0; }
   .share-help li { margin-bottom: 4px; }
-  .share-help > .btn { width: 100%; margin-bottom: 12px; padding: 13px; }
+  .share-help > .btn { width: 100%; margin: 2px 0 8px; padding: 12px; }
   .share-warn { background: #FFF4D6; border: 1px solid #F2D58A; border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
   .share-ok { background: var(--leaf-soft); color: #1f6b41; border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; font-weight: 700; }
   .ocr-progress { display: flex; gap: 12px; align-items: center; margin-top: 12px; }
@@ -357,28 +357,30 @@
       </div>
       <div class="recog-sub">
         <button type="button" class="btn small" id="btnParse">✨ 다시 인식하기</button>
-        <button type="button" class="btn small" id="btnShareHelp" aria-expanded="false">📩 문자 앱에서 바로 보내기</button>
+        <button type="button" class="btn small" id="btnShareHelp" aria-expanded="false">📩 문자를 웹사이트로 보내는 법</button>
       </div>
       <div class="share-help" id="shareHelp" hidden>
+        <p class="share-h">① 설치 없이 웹사이트에서 바로 (추천)</p>
+        <ol>
+          <li>문자 앱에서 주문 문자를 <b>길게 눌러 복사</b></li>
+          <li>이 웹사이트로 돌아오면 <b>자동으로 인식</b>돼요</li>
+        </ol>
+        <p class="hint">처음 한 번은 <b>📋 복사한 문자 붙여넣기</b>를 누르고 <b>허용</b>을 눌러주세요. 그다음부터는 돌아오기만 하면 돼요.
+          (아이폰은 보안 때문에 매번 이 버튼을 눌러야 해요)</p>
+
+        <p class="share-h">② 문자 앱의 「공유」로 보내기 (안드로이드, 선택)</p>
         <p class="share-warn" id="shareFileWarn" hidden>
-          ⚠️ 지금은 컴퓨터 파일로 열려 있어서 이 기능을 쓸 수 없어요.<br>
+          ⚠️ 지금은 컴퓨터 파일로 열려 있어서 이 방법은 쓸 수 없어요.
           휴대폰에서 <b>인터넷 주소(https://…)</b>로 열어주세요.
         </p>
-        <p class="share-ok" id="shareInstalled" hidden>✅ 앱으로 설치돼 있어요. 문자 앱에서 공유만 누르면 돼요!</p>
-        <button type="button" class="btn primary" id="btnInstall" hidden>📲 휴대폰에 앱으로 설치하기</button>
-        <p class="share-h">안드로이드 (갤럭시 등)</p>
+        <p class="share-ok" id="shareInstalled" hidden>✅ 홈 화면에 추가돼 있어요. 문자 앱에서 공유만 누르면 돼요!</p>
         <ol>
-          <li>휴대폰 <b>크롬</b>에서 이 화면을 열고 앱으로 설치하기<br>(크롬 메뉴 <b>⋮ → 홈 화면에 추가 → 설치</b>)</li>
-          <li>문자 앱에서 주문 문자를 <b>길게 누르기 → 공유</b></li>
-          <li>목록에서 <b>🍎 사과 송장</b>을 누르면 앱이 열리면서 <b>자동으로 인식</b>돼요</li>
+          <li>크롬 메뉴 <b>⋮ → 홈 화면에 추가</b> (웹사이트 바로가기를 만드는 거예요)</li>
+          <li>문자를 <b>길게 누르기 → 공유 → 🍎 사과 송장</b></li>
+          <li>웹사이트가 열리면서 <b>자동으로 인식</b>돼요</li>
         </ol>
-        <p class="hint">카톡 대화나 주문 사진도 똑같이 <b>공유 → 사과 송장</b>으로 보낼 수 있어요.</p>
-        <p class="share-h">아이폰</p>
-        <ol>
-          <li>주문 문자를 <b>길게 눌러 복사</b></li>
-          <li>이 화면에서 <b>📋 복사한 문자 붙여넣기</b>를 누르면 바로 인식돼요</li>
-        </ol>
-        <p class="hint">아이폰은 다른 앱의 공유 목록에 웹 앱을 넣을 수 없어서 복사·붙여넣기로 보내요.</p>
+        <button type="button" class="btn" id="btnInstall" hidden>📲 홈 화면에 추가하기</button>
+        <p class="hint">휴대폰 규칙상 「공유」 목록에는 홈 화면에 추가한 웹사이트만 나와요. 카톡 대화·주문 사진도 똑같이 보낼 수 있어요.</p>
       </div>
       <input type="file" id="imgInput" accept="image/*" hidden>
       <div class="ocr-progress" id="ocrProgress" hidden>
@@ -1676,7 +1678,7 @@ function exportCSV() {
 }
 
 /* =========================================================
-   문자 앱에서 바로 보내기 (휴대폰 앱 설치 + 공유받기)
+   문자를 웹사이트로 보내기 (복사하고 돌아오면 자동 인식 · 공유 메뉴로 받기)
    ========================================================= */
 const SHARE_CACHE = 'apple-invoice-share';   // sw.js 와 같은 이름
 let installPrompt = null;
@@ -1698,7 +1700,7 @@ function setupApp() {
     installPrompt = null;
     $('#btnInstall').hidden = true;
     $('#shareInstalled').hidden = false;
-    toast('📲 설치됐어요! 이제 문자 앱에서 공유 → 사과 송장을 눌러보세요');
+    toast('📲 홈 화면에 추가됐어요! 이제 문자 앱에서 공유 → 사과 송장을 눌러보세요');
   });
 }
 async function installApp() {
@@ -1735,12 +1737,38 @@ async function receiveShared() {
   if (image) {
     toast('📩 받은 사진을 읽을게요');
     await recognizeImage(image);
-  } else if (text.trim()) {
+    return true;
+  }
+  if (text.trim()) {
     $('#pasteText').value = text;
     toast('📩 받은 문자를 인식할게요');
     await recognizeFromText();
-  } else if (params.has('shared')) {
-    toast('받은 내용이 비어 있어요. 다시 공유해주세요', 'error');
+    return true;
+  }
+  if (params.has('shared')) toast('받은 내용이 비어 있어요. 다시 공유해주세요', 'error');
+  return false;
+}
+
+/* 문자를 복사하고 이 웹사이트로 돌아오면 자동으로 인식해요
+   (붙여넣기를 한 번 허용한 크롬·엣지에서 동작, 아이폰은 버튼으로) */
+let lastClip = '';
+const looksLikeOrder = t => PHONE_ONE.test(t) || (REGION_RE.test(t) && ADDR_WORD_RE.test(t));
+async function checkClipboard() {
+  if (document.visibilityState !== 'visible' || !navigator.clipboard?.readText || !navigator.permissions) return;
+  try {
+    const perm = await navigator.permissions.query({ name: 'clipboard-read' });
+    if (perm.state !== 'granted') return;
+    const text = (await navigator.clipboard.readText()).trim();
+    if (!text || text === lastClip || !looksLikeOrder(text)) return;
+    lastClip = text;
+    const busy = editingId || !$('#pvModal').hidden || !$('#zipModal').hidden || ocrBusy || recognizing;
+    const filled = ['#toName', '#toPhone', '#toAddr'].some(sel => $(sel).value.trim());
+    if (busy || filled) { toast('📋 새로 복사한 주문이 있어요. 「복사한 문자 붙여넣기」를 누르면 인식해요'); return; }
+    $('#pasteText').value = text;
+    toast('📋 복사한 문자를 찾았어요. 인식할게요');
+    await recognizeFromText();
+  } catch (e) {
+    // 붙여넣기 허용 전이거나 지원하지 않는 브라우저 → 버튼으로 하면 돼요
   }
 }
 
@@ -1757,12 +1785,12 @@ async function pasteFromClipboard() {
         }
         if (item.types.includes('text/plain')) {
           const text = await (await item.getType('text/plain')).text();
-          if (text.trim()) { $('#pasteText').value = text; await recognizeFromText(); return; }
+          if (text.trim()) { lastClip = text.trim(); $('#pasteText').value = text; await recognizeFromText(); return; }
         }
       }
     } else {
       const text = await navigator.clipboard.readText();
-      if (text.trim()) { $('#pasteText').value = text; await recognizeFromText(); return; }
+      if (text.trim()) { lastClip = text.trim(); $('#pasteText').value = text; await recognizeFromText(); return; }
     }
     toast('복사한 문자가 없어요. 주문 문자를 먼저 길게 눌러 복사해주세요', 'error');
   } catch (e) {
@@ -1880,7 +1908,9 @@ function init() {
 
   if (!store.set('appleInvoice.test', 1)) toast('이 브라우저는 주문을 기억하지 못해요. 엑셀 저장을 꼭 해주세요', 'error');
   setupApp();
-  receiveShared();
+  document.addEventListener('visibilitychange', checkClipboard);
+  window.addEventListener('focus', checkClipboard);
+  receiveShared().then(received => { if (!received) checkClipboard(); });
 }
 init();
 </script>
