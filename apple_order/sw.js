@@ -1,7 +1,7 @@
 /* 사과 송장 앱 서비스 워커
    - 문자 앱 등에서 "공유 → 사과 송장"으로 보낸 문자·사진을 받아서 앱에 넘겨줘요
    - 한 번 열었던 화면은 인터넷이 끊겨도 열리게 저장해 둬요 */
-const APP_CACHE = 'apple-invoice-app-v2';
+const APP_CACHE = 'apple-invoice-app-v3';
 const SHARE_CACHE = 'apple-invoice-share';
 const APP_FILES = ['apple_invoice.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png', 'install-qr.png'];
 const here = path => new URL(path, self.registration.scope).href;

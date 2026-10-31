@@ -129,6 +129,7 @@
   .stepper input { width: 80px; text-align: center; border-radius: 0; border-left: 0; border-right: 0; font-weight: 700; }
 
   .zip-row { display: flex; gap: 8px; }
+  .from-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
   .zip-row input { flex: 0 0 110px; min-width: 0; font-weight: 700; letter-spacing: .05em; }
   .zip-row button { flex: 1; min-width: 0; white-space: normal; }
 
@@ -465,6 +466,14 @@
       <p class="hint">비워 두면 <b>확인</b>을 누를 때 입력한 주소로 자동 검색해요. 검색 결과에서 맞는 주소를 한 번 눌러주세요.</p>
     </div>
 
+    <div class="field">
+      <span class="field-label">보내는 분 <span class="opt">(비우면 받는 분과 같아요)</span></span>
+      <div class="from-row">
+        <input id="fromName" type="text" autocomplete="off" placeholder="이름" aria-label="보내는 분 이름">
+        <input id="fromPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="전화번호" aria-label="보내는 분 전화번호">
+      </div>
+    </div>
+
     <details class="box" id="moreBox">
       <summary>➕ 더 입력하기 <span class="sum-note">(무게, 배송 메모 · 선택)</span></summary>
       <div class="field">
@@ -478,18 +487,14 @@
     </details>
 
     <details class="box" id="senderBox">
-      <summary>📦 보내는 분 · 인쇄 설정 <span class="sum-note" id="senderNote"></span></summary>
+      <summary>⚙️ 농장 정보 · 인쇄 설정 <span class="sum-note" id="senderNote"></span></summary>
       <div class="field">
-        <label for="fromName">보내는 분 (농장 이름) <span class="req">*</span></label>
-        <input id="fromName" type="text" autocomplete="off" placeholder="예) 햇살사과농원 김사과">
+        <label for="farmName">농장 이름 <span class="opt">(선택 · 송장 맨 아래에 작게 나와요)</span></label>
+        <input id="farmName" type="text" autocomplete="off" placeholder="예) 햇살사과농원">
       </div>
       <div class="field">
-        <label for="fromPhone">보내는 분 전화번호 <span class="req">*</span></label>
-        <input id="fromPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="예) 010-9876-5432">
-      </div>
-      <div class="field">
-        <label for="fromAddr">보내는 분 주소</label>
-        <input id="fromAddr" type="text" autocomplete="off" placeholder="예) 경북 청송군 청송읍 사과로 1">
+        <label for="farmPhone">농장 전화번호 <span class="opt">(선택)</span></label>
+        <input id="farmPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="예) 010-9876-5432">
       </div>
       <div class="field" style="margin-bottom:6px">
         <label for="paper">인쇄 용지</label>
@@ -575,10 +580,21 @@
    기본 설정
    ========================================================= */
 const CHOICES = {
-  variety: { opts: ['부사(후지)', '홍로', '감홍', '시나노골드', '아리수', '양광', '홍옥'], other: true },
+  variety: { opts: [], other: true },          // 아래 PRODUCTS 로 채워요
   unit:    { opts: ['박스', '개'], def: '박스' },
   weight:  { opts: ['안 씀', '3kg', '5kg', '10kg'], other: true, def: '안 씀' },
 };
+/* 판매 상품 (네이버 폼 주문서와 같아요) — 주문 문자에 오타가 있어도 이 중 하나로 골라요 */
+const PRODUCTS = [
+  { no: 1, name: '실속사과 10kg', grade: '실속', size: '', weight: '10kg', price: 55000, count: '' },
+  { no: 2, name: '실속사과 5kg', grade: '실속', size: '', weight: '5kg', price: 35000, count: '' },
+  { no: 3, name: '정품 대과 5kg', grade: '정품', size: '대과', weight: '5kg', price: 55000, count: '15~16' },
+  { no: 4, name: '정품 중과 5kg', grade: '정품', size: '중과', weight: '5kg', price: 50000, count: '17~18' },
+  { no: 5, name: '정품 중소과 5kg', grade: '정품', size: '중소과', weight: '5kg', price: 45000, count: '19~20' },
+];
+CHOICES.variety.opts = PRODUCTS.map(p => p.name);
+const productOf = name => PRODUCTS.find(p => p.name === name);
+
 const KEYS = {
   orders: 'appleInvoice.orders',
   sender: 'appleInvoice.sender',
@@ -630,7 +646,7 @@ function formatPhone(v) {
   if (d.length <= 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
   return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
 }
-const itemText = o => [o.item.variety, o.item.weight, `${o.item.qty}${o.item.unit}`].filter(Boolean).join(' · ');
+const itemText = o => [o.item.variety, o.item.variety.endsWith(o.item.weight) ? '' : o.item.weight, `${o.item.qty}${o.item.unit}`].filter(Boolean).join(' · ');
 const fullAddr = o => [o.to.addr, o.to.addr2].filter(Boolean).join(' ');
 const safeName = s => String(s).replace(/[\\/:*?"<>|\s]+/g, '_');
 
@@ -673,6 +689,7 @@ function buildChips() {
     box.addEventListener('change', e => {
       if (e.target.name !== name) return;
       box.classList.remove('invalid', 'missing');
+      if (name === 'variety' && productOf(e.target.value)) setChoice('weight', productOf(e.target.value).weight);
       if (cfg.other) {
         const other = $(`#${name}Other`);
         other.hidden = e.target.value !== '기타';
@@ -708,24 +725,21 @@ function setChoice(name, value) {
    ========================================================= */
 function loadSender() {
   const s = store.get(KEYS.sender, {});
-  $('#fromName').value = s.name || '';
-  $('#fromPhone').value = s.phone || '';
-  $('#fromAddr').value = s.addr || '';
+  $('#farmName').value = s.name || '';
+  $('#farmPhone').value = s.phone || '';
   $('#paper').value = settings.paper;
   $('#perBox').checked = settings.perBox;
   $('#autoPdf').checked = settings.autoPdf;
   updateSenderNote();
-  if (!s.name || !s.phone) $('#senderBox').open = true;
 }
 function updateSenderNote() {
-  const name = $('#fromName').value.trim();
-  $('#senderNote').textContent = name ? `(${name})` : '(처음 한 번만 입력)';
+  const name = $('#farmName').value.trim();
+  $('#senderNote').textContent = name ? `(${name})` : '(선택)';
 }
 function saveSender() {
   store.set(KEYS.sender, {
-    name: $('#fromName').value.trim(),
-    phone: formatPhone($('#fromPhone').value),
-    addr: $('#fromAddr').value.trim(),
+    name: $('#farmName').value.trim(),
+    phone: formatPhone($('#farmPhone').value),
   });
   updateSenderNote();
 }
@@ -737,10 +751,14 @@ function saveSettings() {
 }
 
 function readForm() {
+  const toPhone = formatPhone($('#toPhone').value);
+  const fromName = $('#fromName').value.trim();
+  const fromPhone = formatPhone($('#fromPhone').value);
+  const same = !fromName && !fromPhone;     // 보내는 분을 안 적으면 받는 분과 같아요
   return {
     to: {
       name: $('#toName').value.trim(),
-      phone: formatPhone($('#toPhone').value),
+      phone: toPhone,
       zip: $('#toZip').value.replace(/\D/g, '').slice(0, 5),
       addr: $('#toAddr').value.trim(),
       addr2: $('#toAddr2').value.trim(),
@@ -753,9 +771,14 @@ function readForm() {
     },
     memo: $('#memo').value.trim(),
     from: {
-      name: $('#fromName').value.trim(),
-      phone: formatPhone($('#fromPhone').value),
-      addr: $('#fromAddr').value.trim(),
+      same,
+      name: same ? $('#toName').value.trim() : (fromName || $('#toName').value.trim()),
+      phone: same ? toPhone : (fromPhone || toPhone),
+      addr: same ? [$('#toAddr').value.trim(), $('#toAddr2').value.trim()].filter(Boolean).join(' ') : '',
+    },
+    farm: {
+      name: $('#farmName').value.trim(),
+      phone: formatPhone($('#farmPhone').value),
     },
   };
 }
@@ -769,8 +792,6 @@ function validate(data) {
   need(data.item.variety, $('#varietyChips'), '사과 종류를 골라주세요');
   need(data.item.qty >= 1, $('#qty'), '개수를 1 이상으로 입력해주세요');
   need(data.to.addr, $('#toAddr'), '주소를 입력해주세요');
-  need(data.from.name, $('#fromName'), '보내는 분(농장 이름)을 한 번만 입력해주세요');
-  need(data.from.phone.replace(/\D/g, '').length >= 9, $('#fromPhone'), '보내는 분 전화번호를 한 번만 입력해주세요');
   if (!errors.length) return true;
   errors.forEach(e => e.el.classList.add('invalid'));
   const first = errors[0];
@@ -792,13 +813,15 @@ function fillForm(o) {
   setChoice('unit', o.item.unit);
   $('#qty').value = o.item.qty;
   $('#memo').value = o.memo;
+  $('#fromName').value = o.from && !o.from.same ? o.from.name : '';
+  $('#fromPhone').value = o.from && !o.from.same ? o.from.phone : '';
   if (o.item.weight || o.memo) $('#moreBox').open = true;
 }
 
 function resetForm() {
-  ['#toName', '#toPhone', '#toZip', '#toAddr', '#toAddr2', '#memo', '#pasteText'].forEach(s => { $(s).value = ''; });
+  ['#toName', '#toPhone', '#toZip', '#toAddr', '#toAddr2', '#fromName', '#fromPhone', '#memo', '#pasteText'].forEach(s => { $(s).value = ''; });
   $('#qty').value = 1;
-  setChoice('variety', settings.lastVariety);
+  setChoice('variety', productOf(settings.lastVariety) ? settings.lastVariety : '');
   setChoice('weight', settings.lastWeight);
   setChoice('unit', settings.lastUnit);
   $$('.invalid, .missing').forEach(el => el.classList.remove('invalid', 'missing'));
@@ -818,7 +841,6 @@ function setEditing(id) {
    (이름 · 전화번호 · 사과 종류 · 개수 · 주소 · 우편번호)
    ========================================================= */
 const KO_NUM = { 한: 1, 하나: 1, 두: 2, 둘: 2, 세: 3, 셋: 3, 네: 4, 넷: 4, 다섯: 5, 여섯: 6, 일곱: 7, 여덟: 8, 아홉: 9, 열: 10 };
-const VARIETY_RE = [['부사(후지)', /부사|후지/], ['홍로', /[홍흥]로/], ['감홍', /감[홍흥]/], ['시나노골드', /시나노\s*골드/], ['아리수', /아리수/], ['양광', /양광/], ['홍옥', /[홍흥]옥/]];
 const PHONE_RE = /(?<!\d)(?:01[016789]|0[2-6]\d?)[-.\s]?\d{3,4}[-.\s]?\d{4}(?!\d)/g;
 const PHONE_ONE = new RegExp(PHONE_RE.source);   // test()·split()용 (g 없이)
 const REGION_RE = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|충청|전북|전남|전라|경북|경남|경상|제주)[가-힣]*\s*[가-힣]/;
@@ -828,16 +850,17 @@ const DETAIL_RE = /\d+\s*(?:동|호|층)(?:\s|,|$)|아파트|빌라|오피스텔
 const SENDER_RE = /보내는|보낸\s*(?:이|분|사람)|주문자|발송인|입금자/;
 const RECIP_RE = /받는|받으실|수령|수취/;
 const MEMO_HINT_RE = /맡겨|문\s*앞|경비실|부재\s*시|놓아|놔\s*주|연락\s*(?:주|부탁)|전화\s*(?:주|부탁)|초인종|벨\s/;
-const ADDR_STOP_RE = new RegExp([PHONE_RE.source, '부사|후지|홍로|감홍|시나노|아리수|양광|홍옥', '\\d+\\s*(?:박스|상자|kg|㎏|키로)', MEMO_HINT_RE.source, '\\s[가-힣]{2,4}\\s*(?:고객)?님'].join('|'), 'i');
-const NOT_NAME_RE = /발신|광고|안녕|감사|주문|사과|박스|상자|부사|후지|홍로|감홍|양광|홍옥|아리수|시나노|주소|전화|연락|배송|고객|문의|입금|계좌|택배|선물|요청|메모|이름|성함|성명|받는|보내|수령|수취|부탁|번호|종류|개수|수량|우편|휴대|핸드|드려|합니다|해요|주세요|입니다|세요|에요|예요|감홍|경비|아파트/;
+const ADDR_STOP_RE = new RegExp([PHONE_RE.source, '실속|정품|중소과|대과|중과|\\d+\\s*(?:박스|상자|kg|㎏|키로|킬로)|(?:한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\\s*(?:박스|상자)', MEMO_HINT_RE.source, '\\s[가-힣]{2,4}\\s*(?:고객)?님'].join('|'), 'i');
+const NOT_NAME_RE = /발신|광고|안녕|감사|주문|사과|박스|상자|실속|정품|대과|중과|소과|가정|키로|킬로|주소|전화|연락|배송|고객|문의|입금|계좌|택배|선물|요청|메모|이름|성함|성명|받는|보내|수령|수취|부탁|번호|종류|개수|수량|우편|휴대|핸드|드려|합니다|해요|주세요|입니다|세요|에요|예요|감홍|경비|아파트/;
 
 const labelRe = words => new RegExp(`^\\s*(?:${words})\\s*[:)\\]>.=-]*\\s*(.*)$`, 'i');
 const NAME_LABEL = labelRe('(?:받는|받으실|수령|수취)\\s*(?:분|사람|이|인|자)?\\s*(?:이름|성함|성명)?(?![가-힣]*\\s*:?\\s*(?:주소|전화|연락|휴대|핸드|번호|우편|곳))|이름|성함|성명|고객\\s*명');
 const PHONE_LABEL = labelRe('(?:받는\\s*(?:분|사람|이)\\s*)?(?:전화\\s*번호|전화|연락처|휴대\\s*폰|핸드\\s*폰|폰\\s*번호|H\\.?P|tel)');
 const ADDR_LABEL = labelRe('(?:받는\\s*(?:분|사람|이)\\s*)?(?:주소|배송\\s*주소|배송지|받는\\s*곳)');
 const ZIP_LABEL = labelRe('우편\\s*번호|우편');
-const VARIETY_LABEL = labelRe('(?:사과\\s*)?종류|품종|품목|상품');
-const QTY_LABEL = labelRe('개수|갯수|수량|박스\\s*수|주문\\s*수량');
+const VARIETY_LABEL = labelRe('(?:사과\\s*)?종류|품종|품목|주문\\s*상품|상품(?!\\s*수량)');
+const QTY_LABEL = labelRe('개수|갯수|수량|박스\\s*수|(?:주문|상품)\\s*수량');
+const SENDER_LABEL = labelRe('보내는\\s*(?:분|사람|이)|보낸\\s*(?:분|사람|이)|주문자|발송인|주문하신\\s*분');
 const MEMO_LABEL = labelRe('배송\\s*메모|배송\\s*요청|요청\\s*사항|요청|메모');
 
 /* 문자·카톡·사진 글자를 다듬어요 (카톡 시간 표시, 사진 인식 잡음 지우기) */
@@ -853,6 +876,88 @@ function cleanText(raw) {
     .replace(/[0-9OoIl]{3}[-.\s]?[0-9OoIl]{3,4}[-.\s]?[0-9OoIl]{4}/g,
       m => (m.replace(/\D/g, '').length >= 7 ? m.replace(/[Oo]/g, '0').replace(/[Il]/g, '1') : m))
     .replace(/[ \t]+/g, ' ');
+}
+
+/* ── 오타에 강한 상품 고르기 ──
+   글자를 자음·모음으로 쪼개서 비교해요 (정픔 → 정품, 중소가 → 중소과) */
+const CHO = 'ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ';
+const JUNG = 'ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ';
+const JONG = ['', ...'ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ'];
+function jamo(str) {
+  let out = '';
+  for (const ch of str) {
+    const c = ch.charCodeAt(0) - 0xAC00;
+    out += c >= 0 && c < 11172 ? CHO[Math.floor(c / 588)] + JUNG[Math.floor((c % 588) / 28)] + JONG[c % 28] : ch;
+  }
+  return out;
+}
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+  }
+  return d[a.length][b.length];
+}
+/* 낱말이 (조금 틀려도) 들어 있나요? 정확히 있으면 2, 비슷하면 1, 없으면 0
+   오타는 첫 번째 낱말(실속·정품·대과…)만 봐줘요. "큰거" 같은 말은 "~는거"와 헷갈려서 정확히 맞아야 해요 */
+function findWord(hangul, words) {
+  if (words.some(w => hangul.includes(w))) return 2;
+  const chars = [...hangul];
+  for (const w of words.slice(0, 1)) {
+    const n = [...w].length;
+    if (n < 2) continue;
+    const wj = jamo(w);
+    for (let len = n; len <= n + 1; len++) {
+      for (let i = 0; i + len <= chars.length; i++) {
+        if (editDistance(jamo(chars.slice(i, i + len).join('')), wj) <= 1) return 1;
+      }
+    }
+  }
+  return 0;
+}
+const GRADE_WORDS = { 실속: ['실속', '가정용', '못난이', '흠과'], 정품: ['정품', '선물용'] };
+const SIZE_WORDS = { 중소과: ['중소과', '중소', '소과'], 대과: ['대과', '큰과', '큰거', '왕과'], 중과: ['중과'] };
+function matchProduct(text) {
+  text = text.replace(PHONE_RE, ' ');
+  const hangul = (text.match(/[가-힣]+/g) || []).join('');
+  const best = (table) => {
+    let pick = '', score = 0;
+    for (const [key, words] of Object.entries(table)) {
+      const sc = findWord(hangul, words);
+      if (sc > score) { pick = key; score = sc; }
+    }
+    return pick;
+  };
+  const grade = best(GRADE_WORDS);
+  const size = best(SIZE_WORDS);
+  let weight = '';
+  const w = text.match(/(\d+(?:\.\d+)?)\s*(?:kg|㎏|키로|킬로|kilo|k(?![a-z]))/i) || text.match(/(오|십)\s*(?:키로|킬로)/);
+  if (w) weight = `${{ 오: 5, 십: 10 }[w[1]] || parseFloat(w[1])}kg`;
+  const prices = [];
+  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,6})\s*원|(\d+(?:\.\d+)?)\s*만\s*(?:(\d)\s*천)?/g)) {
+    prices.push(m[1] ? +m[1].replace(/,/g, '') : Math.round(parseFloat(m[2]) * 10000 + (+m[3] || 0) * 1000));
+  }
+  let countSize = '';
+  const c = [...text.matchAll(/(?<!\d)(1[5-9]|20)\s*(?:[~\-]\s*(?:1[6-9]|20)\s*)?(?:개|과|알)?/g)].find(m => /[~\-]|개|과|알/.test(m[0]));
+  if (c) countSize = +c[1] <= 16 ? '대과' : +c[1] <= 18 ? '중과' : '중소과';
+  const num = (text.match(/(?<![\d-])([1-5])\s*번/) || text.match(/^\s*([1-5])\s*[.)]\s*(?=[가-힣])/m) || [])[1];
+
+  const scored = PRODUCTS.map(p => {
+    let sc = 0;
+    if (grade) sc += p.grade === grade ? 4 : -4;
+    if (size) sc += p.size === size ? 4 : -3;
+    if (weight) sc += p.weight === weight ? 3 : -4;
+    if (prices.length) sc += prices.includes(p.price) ? 2 : -1;
+    if (countSize) sc += p.size === countSize ? 3 : -2;
+    if (num) sc += p.no === +num ? 6 : -2;
+    return { p, sc };
+  }).sort((a, b) => b.sc - a.sc);
+  if (scored[0].sc <= 0) return { candidates: [] };
+  const top = scored.filter(x => x.sc === scored[0].sc).map(x => x.p.name);
+  return top.length === 1 ? { product: productOf(top[0]) } : { candidates: top };
 }
 
 /* 글자에서 사람 이름(2~4글자)을 골라요 */
@@ -967,22 +1072,38 @@ function parseOrderText(raw) {
   // ── 사과 종류 · 개수 · 무게 ──
   const restText = rest.join('\n');
   const lv = findLabel(VARIETY_LABEL, false);
-  const varietyText = (lv ? lv.value + '\n' : '') + restText;
-  for (const [v, re] of VARIETY_RE) { if (re.test(varietyText)) { r.variety = v; break; } }
+  const found = matchProduct((lv ? lv.value + '\n' : '') + restText);
+  if (found.product) { r.variety = found.product.name; r.weight = found.product.weight; }
+  else r.varietyCandidates = found.candidates;
 
   const lq = findLabel(QTY_LABEL, false);
-  const qtyText = (lq ? lq.value + '\n' : '') + restText;
+  // "15~16개", "(15~16, …)" 같은 상품 설명은 개수로 착각하지 않게 빼요
+  const qtyText = ((lq ? lq.value + '\n' : '') + restText).replace(/\d+\s*[~\-]\s*\d+\s*(?:개|과)?/g, ' ').replace(/\d+(?:\.\d+)?\s*(?:kg|㎏|키로|킬로)/gi, ' ');
   let q = qtyText.match(/(\d+)\s*(박스|상자|box)/i);
   if (q) { r.qty = +q[1]; r.unit = '박스'; }
   if (!q && (q = qtyText.match(/(?<![가-힣])(한|하나|두|둘|세|셋|네|넷|다섯|여섯|일곱|여덟|아홉|열)\s*(박스|상자|개(?![월수]))/))) {
     r.qty = KO_NUM[q[1]]; r.unit = q[2] === '개' ? '개' : '박스';
   }
+  if (!q && lq && (q = lq.value.match(/^(\d+)\s*$/))) { r.qty = +q[1]; r.unit = '박스'; }
   if (!q && (q = qtyText.match(/(\d+)\s*개(?![월수])/))) { r.qty = +q[1]; r.unit = '개'; }
-  if (!q && lq && (q = lq.value.match(/^(\d+)/))) { r.qty = +q[1]; r.unit = '박스'; }
   if (r.qty && (r.qty < 1 || r.qty > 999)) delete r.qty;
 
-  const w = restText.match(/(\d+(?:\.\d+)?)\s*(?:kg|㎏|키로|킬로)/i);
-  if (w) r.weight = `${w[1]}kg`;
+  if (!r.weight) {
+    const w = restText.match(/(\d+(?:\.\d+)?)\s*(?:kg|㎏|키로|킬로)/i);
+    if (w) r.weight = `${w[1]}kg`;
+  }
+
+  // ── 보내는 분 ── (따로 적혀 있을 때만. 없으면 받는 분과 같아요)
+  const ls = lines.findIndex(l => SENDER_LABEL.test(l));
+  if (ls >= 0) {
+    const v = lines[ls].match(SENDER_LABEL)[1] || lines[ls + 1] || '';
+    const name = pickName(v);
+    if (name && name !== r.name) {
+      r.fromName = name;
+      const ph = (lines[ls] + ' ' + (lines[ls].match(SENDER_LABEL)[1] ? '' : lines[ls + 1] || '')).match(PHONE_ONE);
+      if (ph && formatPhone(ph[0]) !== r.phone) r.fromPhone = formatPhone(ph[0]);
+    }
+  }
 
   // ── 배송 메모 ── (이름표가 없으면 "경비실에 맡겨주세요" 같은 부분을 찾아요)
   const lm = findLabel(MEMO_LABEL, false);
@@ -1019,14 +1140,15 @@ function showRecogResult(r, zipState) {
     zip: r.zip,
   };
   const missing = [];
+  const noteVariety = r.varietyCandidates && r.varietyCandidates.length ? `골라주세요: ${r.varietyCandidates.join(' / ')}` : '';
   $('#recogResult').innerHTML = RECOG_ITEMS.map(([key, label, sel]) => {
     let cls = value[key] ? 'ok' : 'miss';
-    let text = value[key] || (key === 'qty' ? '못 찾음 → 1박스' : '못 찾음');
+    let text = value[key] || (key === 'qty' ? '못 찾음 → 1박스' : key === 'variety' && noteVariety ? noteVariety : '못 찾음');
     if (key === 'zip' && !value.zip && zipState === 'searching') { cls = 'wait'; text = '찾는 중…'; }
     if (cls === 'miss') { missing.push(sel); $(sel).classList.add('missing'); }
     const icon = { ok: '✅', miss: '⚠️', wait: '⏳' }[cls];
     return `<li class="${cls}"><span>${icon} ${label}</span><b title="${esc(text)}">${esc(text)}</b></li>`;
-  }).join('');
+  }).join('') + `<li class="ok"><span>✅ 보내는 분</span><b>${esc(r.fromName ? [r.fromName, r.fromPhone].filter(Boolean).join(' ') : '받는 분과 같음')}</b></li>`;
   $('#recogResult').hidden = false;
   return missing;
 }
@@ -1046,11 +1168,13 @@ async function recognizeFromText() {
     $('#toAddr2').value = r.addr2 || '';
     $('#toZip').value = r.zip || '';
     $('#memo').value = r.memo || '';
+    $('#fromName').value = r.fromName || '';
+    $('#fromPhone').value = r.fromPhone || '';
     $('#qty').value = r.qty || 1;
     setChoice('variety', r.variety || '');
     setChoice('unit', r.unit || '박스');
     setChoice('weight', r.weight || '');
-    if (r.memo || r.weight) $('#moreBox').open = true;
+    if (r.memo) $('#moreBox').open = true;
     $$('.invalid').forEach(el => el.classList.remove('invalid'));
 
     if (r.addr && !r.zip) {
@@ -1480,7 +1604,8 @@ function renderLabel(o, boxNo, boxTotal) {
   hLine(ctx, 97, 0.6);
 
   // ⑤ 상품
-  const cols = [[L - 4, 54, '사과 종류', o.item.variety], [54, 74, '무게', o.item.weight || '-'], [74, R + 4, '개수', `${o.item.qty}${o.item.unit}`]];
+  const varietyShort = o.item.variety.replace(/\s*\d+(?:\.\d+)?kg$/i, '') || o.item.variety;
+  const cols = [[L - 4, 54, '사과 종류', varietyShort], [54, 74, '무게', o.item.weight || '-'], [74, R + 4, '개수', `${o.item.qty}${o.item.unit}`]];
   cols.forEach(([x1, x2, head, val], i) => {
     drawText(ctx, head, x1, 98.4, x2 - x1, 2.8, { align: 'center' });
     drawText(ctx, val, x1 + 1.5, 106.2, x2 - x1 - 3, 6, { weight: 900, align: 'center' });
@@ -1496,7 +1621,8 @@ function renderLabel(o, boxNo, boxTotal) {
 
   // ⑦ 아래쪽
   drawText(ctx, `주문일 ${o.date.replace(/-/g, '.')}`, L, 136.8, 40, 2.9);
-  drawText(ctx, boxTotal > 1 ? `총 ${boxTotal}박스` : '사과(농산물)', L, 141.2, 40, 2.9);
+  const farm = o.farm && o.farm.name ? `${o.farm.name} ${o.farm.phone || ''}`.trim() : (boxTotal > 1 ? `총 ${boxTotal}박스` : '사과(농산물)');
+  drawText(ctx, farm, L, 141.2, 44, 2.9);
   drawText(ctx, '농산물 · 취급주의', R - 50, 136.4, 50, 4.2, { weight: 900, align: 'right' });
   drawText(ctx, '던지지 마세요 · 눕히지 마세요', R - 50, 141.6, 50, 2.9, { weight: 700, align: 'right' });
   return c;
@@ -1673,7 +1799,7 @@ function renderList() {
         </div>
         <div class="o-item">🍎 ${esc(itemText(o))}</div>
         <div class="o-addr">${o.to.zip ? `(${esc(o.to.zip)}) ` : ''}${esc(fullAddr(o))}</div>
-        <div class="o-meta">${esc(o.no)} · ${esc(o.date)}${o.memo ? ` · 메모: ${esc(o.memo)}` : ''}</div>
+        <div class="o-meta">${esc(o.no)} · ${esc(o.date)}${o.from && !o.from.same ? ` · 보내는 분: ${esc(o.from.name)}` : ''}${o.memo ? ` · 메모: ${esc(o.memo)}` : ''}</div>
         <div class="o-btns">
           <button type="button" class="btn small" data-act="view" data-id="${o.id}">📄 송장 보기</button>
           <button type="button" class="btn small" data-act="edit" data-id="${o.id}">✏️ 고치기</button>
@@ -1977,11 +2103,11 @@ function init() {
     q.value = Math.min(999, Math.max(1, (parseInt(q.value, 10) || 0) + Number(b.dataset.step)));
     q.classList.remove('invalid');
   }));
-  ['#toPhone', '#fromPhone'].forEach(s => $(s).addEventListener('blur', e => { e.target.value = formatPhone(e.target.value); }));
+  ['#toPhone', '#fromPhone', '#farmPhone'].forEach(s => $(s).addEventListener('blur', e => { e.target.value = formatPhone(e.target.value); }));
   $('#toAddr').addEventListener('input', () => { $('#toZip').value = ''; });  // 주소가 바뀌면 우편번호를 다시 찾아요
   $('#toZip').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 5); });
   $$('#formCard input').forEach(el => el.addEventListener('input', () => el.classList.remove('invalid', 'missing')));
-  ['#fromName', '#fromPhone', '#fromAddr'].forEach(s => $(s).addEventListener('change', saveSender));
+  ['#farmName', '#farmPhone'].forEach(s => $(s).addEventListener('change', saveSender));
   ['#paper', '#perBox', '#autoPdf'].forEach(s => $(s).addEventListener('change', saveSettings));
 
   // 미리보기 팝업
