@@ -925,6 +925,10 @@ function parseOrderText(raw) {
     const only = lines.find(l => /^\(?\d{5}\)?$/.test(l));
     if (only) r.zip = only.replace(/\D/g, '');
   }
+  if (!r.zip) {                                  // "(06142)" 처럼 괄호 안 5자리
+    const m = lines.join(' ').match(/\((\d{5})\)/);
+    if (m) r.zip = m[1];
+  }
 
   // ── 이름 ──
   let nameLine = -1;
@@ -1784,6 +1788,9 @@ function renderInstall(state) {
     } else if (IN_KAKAO || IN_OTHER_APP) {
       text = `카톡·네이버 앱 안에서는 설치가 안 돼요. <b>${IS_IOS ? '사파리' : '크롬'}</b>에서 열어주세요.`;
       actions = `<button type="button" class="btn primary" data-install="external">🌐 ${IS_IOS ? '사파리' : '크롬'}에서 열기</button>`;
+    } else if (/SamsungBrowser/i.test(UA) && !installPrompt) {
+      text = '삼성 인터넷에서는 설치가 잘 안 돼요. <b>크롬</b>에서 열면 버튼 한 번으로 설치되고, 문자 <b>공유</b>도 돼요.' + SAFE_NOTE;
+      actions = '<button type="button" class="btn primary" data-install="external">🌐 크롬에서 열기</button>';
     } else if (installPrompt) {
       text = '버튼을 누르고 <b>설치</b>만 누르면 끝! 설치하면 문자 앱 <b>공유</b> 목록에 「사과 송장」이 생겨요.' + SAFE_NOTE;
       actions = '<button type="button" class="btn primary" data-install="prompt">📲 앱 설치하기</button>';
