@@ -1,7 +1,8 @@
 {
+  "id": "./apple_invoice.html",
   "name": "사과 송장 만들기",
   "short_name": "사과 송장",
-  "description": "문자·카톡·사진으로 받은 사과 주문을 인식해서 송장을 만들어요",
+  "description": "문자·카톡·사진으로 받은 사과 주문을 자동으로 인식해서 송장(PDF)을 만들고 인쇄해요. 문자를 길게 눌러 공유 → 사과 송장을 누르면 바로 인식돼요.",
   "lang": "ko",
   "start_url": "./apple_invoice.html",
   "scope": "./",
@@ -9,9 +10,24 @@
   "background_color": "#FBF6F0",
   "theme_color": "#D7263D",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ],
   "share_target": {
     "action": "./share-target",
@@ -21,7 +37,34 @@
       "title": "title",
       "text": "text",
       "url": "url",
-      "files": [{ "name": "image", "accept": ["image/*"] }]
+      "files": [
+        {
+          "name": "image",
+          "accept": [
+            "image/*"
+          ]
+        }
+      ]
     }
-  }
+  },
+  "categories": [
+    "business",
+    "productivity"
+  ],
+  "screenshots": [
+    {
+      "src": "screenshot-1.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "주문 문자를 자동으로 인식해요"
+    },
+    {
+      "src": "screenshot-2.png",
+      "sizes": "780x1688",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "확인을 누르면 송장이 완성돼요"
+    }
+  ]
 }

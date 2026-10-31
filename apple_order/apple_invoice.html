@@ -169,6 +169,22 @@
   .recog-btns .btn { white-space: normal; padding: 11px 8px; }
   .recog-sub { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .recog-sub .btn { flex: 1 1 auto; white-space: normal; }
+  .install-wrap { max-width: 1180px; margin: 16px auto 0; padding: 0 16px; }
+  .install {
+    display: flex; gap: 14px; align-items: flex-start;
+    background: #fff; border: 2px solid var(--apple); border-radius: var(--radius);
+    padding: 16px; box-shadow: 0 4px 16px rgba(215, 38, 61, .12);
+  }
+  .install-icon { width: 56px; height: 56px; border-radius: 14px; flex: 0 0 auto; }
+  .install-body { flex: 1; min-width: 0; }
+  .install-title { display: block; font-size: 18px; margin-bottom: 4px; }
+  .install-text { font-size: 15px; }
+  .install-text .safe { display: block; color: var(--leaf); font-weight: 700; margin-top: 4px; font-size: 14px; }
+  .install-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 10px; }
+  .install-actions .btn { font-size: 17px; padding: 13px 22px; }
+  .install-actions img.qr { width: 150px; height: 150px; border: 1px solid var(--line); border-radius: 10px; }
+  .install .x { margin: -8px -8px 0 0; }
+  .key { display: inline-block; border: 1.5px solid var(--text); border-radius: 6px; padding: 0 6px; font-weight: 800; line-height: 1.5; }
   .share-help { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; font-size: 15px; }
   .share-help ol { margin: 6px 0 10px; padding-left: 22px; }
   .share-h { font-weight: 800; margin: 14px 0 0; }
@@ -337,6 +353,18 @@
   </div>
 </header>
 
+<div class="install-wrap">
+  <section class="install" id="installBanner" hidden>
+    <img src="icon-192.png" alt="" class="install-icon">
+    <div class="install-body">
+      <b class="install-title" id="installTitle"></b>
+      <div class="install-text" id="installText"></div>
+      <div class="install-actions" id="installActions"></div>
+    </div>
+    <button type="button" class="x" id="installClose" aria-label="닫기">×</button>
+  </section>
+</div>
+
 <main class="wrap">
   <!-- ================= 주문 입력 ================= -->
   <section class="card" id="formCard">
@@ -357,30 +385,30 @@
       </div>
       <div class="recog-sub">
         <button type="button" class="btn small" id="btnParse">✨ 다시 인식하기</button>
-        <button type="button" class="btn small" id="btnShareHelp" aria-expanded="false">📩 문자를 웹사이트로 보내는 법</button>
+        <button type="button" class="btn small" id="btnShareHelp" aria-expanded="false">📩 문자·카톡 보내는 법</button>
       </div>
       <div class="share-help" id="shareHelp" hidden>
-        <p class="share-h">① 설치 없이 웹사이트에서 바로 (추천)</p>
+        <p class="share-h">① 설치 없이 바로 (문자·카톡 모두)</p>
         <ol>
-          <li>문자 앱에서 주문 문자를 <b>길게 눌러 복사</b></li>
-          <li>이 웹사이트로 돌아오면 <b>자동으로 인식</b>돼요</li>
+          <li>문자나 카톡에서 주문을 <b>길게 눌러 복사</b></li>
+          <li>이 화면으로 돌아오면 <b>자동으로 인식</b>돼요</li>
         </ol>
         <p class="hint">처음 한 번은 <b>📋 복사한 문자 붙여넣기</b>를 누르고 <b>허용</b>을 눌러주세요. 그다음부터는 돌아오기만 하면 돼요.
           (아이폰은 보안 때문에 매번 이 버튼을 눌러야 해요)</p>
 
-        <p class="share-h">② 문자 앱의 「공유」로 보내기 (안드로이드, 선택)</p>
+        <p class="share-h">② 앱 설치 후 「공유」로 보내기 (안드로이드)</p>
         <p class="share-warn" id="shareFileWarn" hidden>
           ⚠️ 지금은 컴퓨터 파일로 열려 있어서 이 방법은 쓸 수 없어요.
           휴대폰에서 <b>인터넷 주소(https://…)</b>로 열어주세요.
         </p>
         <p class="share-ok" id="shareInstalled" hidden>✅ 홈 화면에 추가돼 있어요. 문자 앱에서 공유만 누르면 돼요!</p>
         <ol>
-          <li>크롬 메뉴 <b>⋮ → 홈 화면에 추가</b> (웹사이트 바로가기를 만드는 거예요)</li>
-          <li>문자를 <b>길게 누르기 → 공유 → 🍎 사과 송장</b></li>
-          <li>웹사이트가 열리면서 <b>자동으로 인식</b>돼요</li>
+          <li>맨 위 <b>📲 앱 설치하기</b> (또는 크롬 메뉴 <b>⋮ → 홈 화면에 추가 → 설치</b>)</li>
+          <li>문자·카톡을 <b>길게 누르기 → 공유 → 🍎 사과 송장</b></li>
+          <li>앱이 열리면서 <b>자동으로 인식</b>돼요</li>
         </ol>
-        <button type="button" class="btn" id="btnInstall" hidden>📲 홈 화면에 추가하기</button>
-        <p class="hint">휴대폰 규칙상 「공유」 목록에는 홈 화면에 추가한 웹사이트만 나와요. 카톡 대화·주문 사진도 똑같이 보낼 수 있어요.</p>
+        <button type="button" class="btn" id="btnInstall" hidden>📲 앱 설치하기</button>
+        <p class="hint">휴대폰 규칙상 「공유」 목록에는 설치한 앱만 나와요. 주문 사진도 똑같이 보낼 수 있어요.</p>
       </div>
       <input type="file" id="imgInput" accept="image/*" hidden>
       <div class="ocr-progress" id="ocrProgress" hidden>
@@ -1683,32 +1711,119 @@ function exportCSV() {
 const SHARE_CACHE = 'apple-invoice-share';   // sw.js 와 같은 이름
 let installPrompt = null;
 
+const APP_URL = 'https://jykim8302.github.io/ocr-dashboard/apple_order/';
+const UA = navigator.userAgent;
+const IS_IOS = /iPhone|iPad|iPod/i.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_ANDROID = /Android/i.test(UA);
+const IN_KAKAO = /KAKAOTALK/i.test(UA);
+const IN_OTHER_APP = /NAVER|Instagram|FBAN|FBAV|Line\/|DaumApps|everytimeApp|; wv\)/i.test(UA);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const SAFE_NOTE = '<span class="safe">🔒 플레이스토어 앱이 아니라서 보안 설정을 바꿀 필요 없어요.</span>';
+const QR_HTML = '<img class="qr" src="install-qr.png" alt="설치 주소 QR 코드">';
+
 function setupApp() {
   const isWeb = /^https?:$/.test(location.protocol);
   $('#shareFileWarn').hidden = isWeb;
   if (isWeb && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(e => console.warn('서비스 워커 등록 실패', e));
   }
-  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  $('#shareInstalled').hidden = !standalone;
+  $('#shareInstalled').hidden = !isStandalone();
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
     installPrompt = e;
     $('#btnInstall').hidden = false;
+    renderInstall();
   });
   window.addEventListener('appinstalled', () => {
     installPrompt = null;
     $('#btnInstall').hidden = true;
     $('#shareInstalled').hidden = false;
-    toast('📲 홈 화면에 추가됐어요! 이제 문자 앱에서 공유 → 사과 송장을 눌러보세요');
+    renderInstall('done');
   });
+  $('#installClose').addEventListener('click', () => {
+    $('#installBanner').hidden = true;
+    store.set('appleInvoice.installHide', Date.now());
+  });
+  $('#installActions').addEventListener('click', e => {
+    const act = e.target.closest('[data-install]')?.dataset.install;
+    if (act === 'prompt') installApp();
+    if (act === 'external') openInBrowser();
+    if (act === 'ok') { $('#installBanner').hidden = true; store.set('appleInvoice.tipSeen', true); }
+  });
+  // 카톡 안에서 열면 설치가 안 돼요 → 한 번은 자동으로 크롬(아이폰은 사파리)으로 옮겨요
+  if (isWeb && IN_KAKAO && !sessionStorage.getItem('appleInvoice.leftKakao')) {
+    sessionStorage.setItem('appleInvoice.leftKakao', '1');
+    openInBrowser();
+  }
+  renderInstall();
 }
+
+/* 휴대폰·브라우저에 맞는 설치 안내를 맨 위에 보여줘요 */
+function renderInstall(state) {
+  const banner = $('#installBanner');
+  let title = '📲 사과 송장 앱 설치하기 (1분)';
+  let text = '';
+  let actions = '';
+  if (state === 'done') {
+    title = '✅ 설치됐어요!';
+    text = '홈 화면의 <b>🍎 사과 송장</b>을 열어서 쓰세요.<br>문자를 <b>길게 누르기 → 공유 → 사과 송장</b>을 누르면 바로 인식돼요.';
+  } else if (isStandalone()) {
+    if (store.get('appleInvoice.tipSeen', false)) { banner.hidden = true; return; }
+    title = '🍎 이렇게 쓰세요';
+    text = IS_IOS
+      ? '주문 문자를 <b>길게 눌러 복사</b>한 뒤, 여기서 <b>📋 복사한 문자 붙여넣기</b>를 누르세요.'
+      : '문자 앱에서 주문 문자를 <b>길게 누르기 → 공유 → 🍎 사과 송장</b>. 앱이 열리면서 바로 인식돼요.';
+    actions = '<button type="button" class="btn primary" data-install="ok">알겠어요</button>';
+  } else {
+    const hiddenAt = store.get('appleInvoice.installHide', 0);
+    if (Date.now() - hiddenAt < 3 * 24 * 3600 * 1000) { banner.hidden = true; return; }
+    if (location.protocol === 'file:' || (!IS_IOS && !IS_ANDROID && !installPrompt)) {
+      title = '📱 휴대폰에 앱으로 설치하기';
+      text = '휴대폰 <b>카메라로 QR 코드를 찍으면</b> 설치 화면이 열려요.' + SAFE_NOTE;
+      actions = QR_HTML;
+    } else if (IN_KAKAO || IN_OTHER_APP) {
+      text = `카톡·네이버 앱 안에서는 설치가 안 돼요. <b>${IS_IOS ? '사파리' : '크롬'}</b>에서 열어주세요.`;
+      actions = `<button type="button" class="btn primary" data-install="external">🌐 ${IS_IOS ? '사파리' : '크롬'}에서 열기</button>`;
+    } else if (installPrompt) {
+      text = '버튼을 누르고 <b>설치</b>만 누르면 끝! 설치하면 문자 앱 <b>공유</b> 목록에 「사과 송장」이 생겨요.' + SAFE_NOTE;
+      actions = '<button type="button" class="btn primary" data-install="prompt">📲 앱 설치하기</button>';
+      if (!IS_ANDROID && !IS_IOS) actions += QR_HTML;
+    } else if (IS_IOS) {
+      text = (/CriOS/i.test(UA)
+        ? '주소창 오른쪽 <span class="key">공유 ⬆</span> → <span class="key">홈 화면에 추가</span>를 눌러주세요.'
+        : '화면 아래 <span class="key">공유 ⬆</span> → <span class="key">홈 화면에 추가</span> → <span class="key">추가</span>를 눌러주세요.') + SAFE_NOTE;
+    } else {
+      text = (/SamsungBrowser/i.test(UA)
+        ? '아래 메뉴 <span class="key">≡</span> → <span class="key">현재 페이지 추가</span> → <span class="key">홈 화면</span>을 눌러주세요.'
+        : '오른쪽 위 <span class="key">⋮</span> → <span class="key">홈 화면에 추가</span> → <span class="key">설치</span>를 눌러주세요.') + SAFE_NOTE;
+    }
+  }
+  $('#installTitle').textContent = title;
+  $('#installText').innerHTML = text;
+  $('#installActions').innerHTML = actions;
+  banner.hidden = false;
+}
+
+/* 카톡·네이버 앱 안의 브라우저에서 크롬(아이폰은 사파리)으로 옮겨 열어요 */
+function openInBrowser() {
+  const url = /^https?:$/.test(location.protocol) ? location.href.split('#')[0] : APP_URL;
+  if (IS_ANDROID) {
+    const u = new URL(url);
+    location.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=https;package=com.android.chrome;end`;
+  } else if (IN_KAKAO) {
+    location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(url);
+  } else {
+    toast('오른쪽 아래 ⋯ 메뉴에서 「Safari로 열기」를 눌러주세요');
+  }
+}
+
 async function installApp() {
   if (!installPrompt) return;
   installPrompt.prompt();
-  await installPrompt.userChoice.catch(() => null);
+  const choice = await installPrompt.userChoice.catch(() => null);
   installPrompt = null;
   $('#btnInstall').hidden = true;
+  if (!choice || choice.outcome !== 'accepted') renderInstall();
 }
 
 /* 공유로 받은 문자·사진(sw.js 가 저장해 둔 것) 또는 주소의 ?text= 를 바로 인식해요 */
