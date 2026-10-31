@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>사과 송장 만들기</title>
+<!-- 우편번호 찾기 (카카오/다음 우편번호 서비스, 무료·키 필요 없음) -->
+<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js" async></script>
+<style id="pageStyle"></style>
+<style>
+  :root {
+    --apple: #D7263D;
+    --apple-dark: #A61B2E;
+    --apple-soft: #FDECEE;
+    --leaf: #2E8B57;
+    --leaf-soft: #E7F5EC;
+    --bg: #FBF6F0;
+    --card: #FFFFFF;
+    --line: #EADFD3;
+    --text: #2B2420;
+    --muted: #7A6E66;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  /* ---------- 상단 ---------- */
+  .top {
+    background: var(--apple);
+    color: #fff;
+    padding: 18px 16px;
+  }
+  .top-inner { max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; justify-content: space-between; }
+  .brand { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  .steps { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0; font-size: 14px; flex-wrap: wrap; }
+  .steps li { background: rgba(255,255,255,.18); padding: 4px 12px; border-radius: 999px; }
+
+  .wrap {
+    max-width: 1180px;
+    margin: 20px auto 40px;
+    padding: 0 16px;
+    display: grid;
+    gap: 20px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  @media (min-width: 980px) {
+    .wrap { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: start; }
+    #listCard { position: sticky; top: 16px; }
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(80, 40, 20, .04);
+  }
+  h2 { font-size: 19px; margin: 0; }
+
+  /* ---------- 입력 폼 ---------- */
+  .field { margin-bottom: 18px; }
+  .field > label, .field-label {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .req { color: var(--apple); }
+  .opt { color: var(--muted); font-weight: 400; font-size: 14px; }
+  input[type=text], input[type=tel], input[type=number], input:not([type]), textarea, select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1.5px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    font-size: 17px;
+    outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--apple); box-shadow: 0 0 0 3px var(--apple-soft); }
+  .invalid, .invalid:focus { border-color: var(--apple) !important; background: var(--apple-soft) !important; }
+  .chips.invalid { border-radius: 10px; padding: 6px; }
+  textarea { resize: vertical; min-height: 96px; }
+  .stack > * + * { margin-top: 8px; }
+  .hint { color: var(--muted); font-size: 13.5px; margin: 6px 0 0; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .chip span {
+    display: inline-block;
+    padding: 9px 16px;
+    border: 1.5px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    font-weight: 600;
+    user-select: none;
+    transition: all .12s;
+  }
+  .chip:hover span { border-color: #d8c7b6; }
+  .chip input:checked + span { background: var(--apple); border-color: var(--apple); color: #fff; }
+  .chip input:focus-visible + span { box-shadow: 0 0 0 3px var(--apple-soft); }
+  .chips .other-input { width: 160px; flex: 0 0 auto; padding: 9px 12px; font-size: 16px; }
+
+  .qty-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .stepper { display: flex; align-items: stretch; }
+  .stepper button {
+    width: 48px;
+    border: 1.5px solid var(--line);
+    background: #fff;
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .stepper button:first-child { border-radius: 10px 0 0 10px; }
+  .stepper button:last-child { border-radius: 0 10px 10px 0; }
+  .stepper input { width: 80px; text-align: center; border-radius: 0; border-left: 0; border-right: 0; font-weight: 700; }
+
+  .zip-row { display: flex; gap: 8px; }
+  .zip-row input { flex: 0 0 120px; font-weight: 700; letter-spacing: .05em; }
+  .zip-row button { flex: 1; }
+
+  details.box {
+    border: 1.5px dashed var(--line);
+    border-radius: 12px;
+    padding: 0 14px;
+    margin-bottom: 18px;
+  }
+  details.box[open] { padding-bottom: 14px; }
+  details.box > summary {
+    cursor: pointer;
+    font-weight: 700;
+    padding: 12px 0;
+    list-style: none;
+  }
+  details.box > summary::-webkit-details-marker { display: none; }
+  details.box > summary::after { content: "펼치기 ▾"; float: right; color: var(--muted); font-weight: 400; font-size: 14px; }
+  details.box[open] > summary::after { content: "접기 ▴"; }
+  .sum-note { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: 4px; }
+  .check { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 15px; }
+  .check input { width: 20px; height: 20px; accent-color: var(--apple); }
+
+  .btn {
+    border: 1.5px solid var(--line);
+    background: #fff;
+    border-radius: 10px;
+    padding: 11px 16px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: #d8c7b6; background: #fffaf5; }
+  .btn.primary { background: var(--apple); border-color: var(--apple); color: #fff; }
+  .btn.primary:hover { background: var(--apple-dark); border-color: var(--apple-dark); }
+  .btn.green { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+  .btn.green:hover { filter: brightness(.92); }
+  .btn.small { padding: 7px 12px; font-size: 14px; border-radius: 8px; }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+
+  .actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    gap: 10px;
+    background: linear-gradient(to top, #fff 75%, rgba(255,255,255,0));
+    padding: 14px 0 4px;
+    margin-top: 4px;
+  }
+  .actions .btn.primary { flex: 1; font-size: 18px; padding: 15px; }
+
+  .edit-banner {
+    background: #FFF4D6;
+    border: 1px solid #F2D58A;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* ---------- 주문 목록 ---------- */
+  .list-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .summary { color: var(--muted); font-size: 14px; }
+  .list-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .list-tools input[type=search] { flex: 1; min-width: 140px; padding: 9px 12px; font-size: 15px; border: 1.5px solid var(--line); border-radius: 10px; outline: none; }
+  .seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .seg button { border: 0; background: #fff; padding: 8px 14px; font-weight: 600; font-size: 14px; }
+  .seg button.on { background: var(--text); color: #fff; }
+  .list-actions { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); align-items: center; }
+  .list-actions .check { margin: 0 6px 0 0; }
+  .orders { list-style: none; margin: 0; padding: 0; max-height: 70vh; overflow-y: auto; }
+  .order { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 14px 4px; border-bottom: 1px solid var(--line); }
+  .order input[type=checkbox] { width: 20px; height: 20px; margin-top: 3px; accent-color: var(--apple); }
+  .o-top { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .o-name { font-weight: 800; font-size: 17px; }
+  .o-phone { color: var(--muted); }
+  .o-item { font-weight: 600; color: var(--apple-dark); }
+  .o-addr { font-size: 14.5px; overflow-wrap: anywhere; }
+  .o-meta { font-size: 13px; color: var(--muted); }
+  .o-btns { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--leaf-soft); color: var(--leaf); }
+  .badge.wait { background: #F3EEE8; color: var(--muted); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 10px; }
+
+  /* ---------- 팝업 ---------- */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(30, 20, 15, .55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 50;
+  }
+  .modal-box {
+    background: #fff;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 560px;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 20px;
+  }
+  .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .modal-head h3 { margin: 0; font-size: 20px; }
+  .x { border: 0; background: none; font-size: 28px; line-height: 1; padding: 4px 8px; color: var(--muted); }
+  .pv-note { background: var(--leaf-soft); color: #1f6b41; border-radius: 10px; padding: 10px 14px; font-size: 15px; margin-bottom: 12px; }
+  .pv-img { background: #F3EEE8; border-radius: 12px; padding: 14px; text-align: center; }
+  .pv-img img { display: block; margin: 0 auto; width: auto; max-width: 100%; height: auto; max-height: min(440px, 48vh); background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  .pv-count { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  .pv-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+  .pv-actions .btn { padding: 14px 10px; font-size: 16px; }
+  #zipEmbed { height: min(480px, calc(100vh - 140px)); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    top: 16px;
+    transform: translateX(-50%) translateY(-20px);
+    background: #2B2420;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 12px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: all .25s;
+    z-index: 100;
+    max-width: calc(100vw - 32px);
+    text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { background: var(--apple-dark); }
+
+  /* ---------- 인쇄 ---------- */
+  #printArea { display: none; }
+  @media print {
+    html, body { background: #fff !important; }
+    body > :not(#printArea) { display: none !important; }
+    #printArea { display: block !important; }
+    .sheet { display: flex; justify-content: center; align-items: center; overflow: hidden; break-after: page; page-break-after: always; }
+    .sheet:last-child { break-after: auto; page-break-after: auto; }
+    .sheet img { display: block; width: 100mm; height: 150mm; }
+    .paper-a4 .sheet { height: 192mm; gap: 12mm; }
+    .paper-label .sheet { width: 100mm; height: 149mm; }
+    .paper-label .sheet img { width: 99mm; height: 148.5mm; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">🍎 사과 송장 만들기</div>
+    <ol class="steps">
+      <li>① 주문 입력</li>
+      <li>② 확인 누르기</li>
+      <li>③ 송장 파일 저장 · 인쇄</li>
+    </ol>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- ================= 주문 입력 ================= -->
+  <section class="card" id="formCard">
+    <div class="edit-banner" id="editBanner" hidden>
+      <span>✏️ <b id="editNo"></b> 주문을 고치는 중이에요</span>
+      <button class="btn small" id="btnCancelEdit">고치기 취소</button>
+    </div>
+
+    <details class="box" id="pasteBox">
+      <summary>📋 주문 문자 붙여넣기 <span class="sum-note">(자동 입력)</span></summary>
+      <textarea id="pasteText" placeholder="받은 주문 문자/카톡을 그대로 붙여넣으세요&#10;예) 홍길동 010-1234-5678&#10;서울 강남구 테헤란로 123 101동 202호&#10;부사 2박스"></textarea>
+      <button class="btn green" id="btnParse" style="margin-top:8px;width:100%">✨ 자동으로 채우기</button>
+    </details>
+
+    <div class="field">
+      <label for="toName">받는 분 이름 <span class="req">*</span></label>
+      <input id="toName" type="text" autocomplete="off" placeholder="예) 홍길동">
+    </div>
+
+    <div class="field">
+      <label for="toPhone">전화번호 <span class="req">*</span></label>
+      <input id="toPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="예) 010-1234-5678">
+    </div>
+
+    <div class="field">
+      <span class="field-label">사과 종류 <span class="req">*</span></span>
+      <div class="chips" data-chips="variety" id="varietyChips"></div>
+    </div>
+
+    <div class="field">
+      <span class="field-label">개수 <span class="req">*</span></span>
+      <div class="qty-row">
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="하나 빼기">−</button>
+          <input id="qty" type="number" min="1" max="999" value="1" inputmode="numeric" aria-label="개수">
+          <button type="button" data-step="1" aria-label="하나 더하기">+</button>
+        </div>
+        <div class="chips" data-chips="unit"></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="toAddr">주소 <span class="req">*</span></label>
+      <div class="stack">
+        <input id="toAddr" type="text" autocomplete="off" placeholder="예) 서울 강남구 테헤란로 123">
+        <input id="toAddr2" type="text" autocomplete="off" placeholder="상세 주소 (동·호수)  예) 101동 202호">
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="toZip">우편번호 <span class="opt">(주소로 자동으로 찾아요)</span></label>
+      <div class="zip-row">
+        <input id="toZip" type="text" inputmode="numeric" maxlength="5" autocomplete="off" placeholder="00000">
+        <button type="button" class="btn" id="btnZip">🔍 주소로 우편번호 찾기</button>
+      </div>
+      <p class="hint">비워 두면 <b>확인</b>을 누를 때 입력한 주소로 자동 검색해요. 검색 결과에서 맞는 주소를 한 번 눌러주세요.</p>
+    </div>
+
+    <details class="box" id="moreBox">
+      <summary>➕ 더 입력하기 <span class="sum-note">(무게, 배송 메모 · 선택)</span></summary>
+      <div class="field">
+        <span class="field-label">무게</span>
+        <div class="chips" data-chips="weight"></div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="memo">배송 메모</label>
+        <input id="memo" type="text" maxlength="80" autocomplete="off" placeholder="예) 문 앞에 놓아주세요">
+      </div>
+    </details>
+
+    <details class="box" id="senderBox">
+      <summary>📦 보내는 분 · 인쇄 설정 <span class="sum-note" id="senderNote"></span></summary>
+      <div class="field">
+        <label for="fromName">보내는 분 (농장 이름) <span class="req">*</span></label>
+        <input id="fromName" type="text" autocomplete="off" placeholder="예) 햇살사과농원 김사과">
+      </div>
+      <div class="field">
+        <label for="fromPhone">보내는 분 전화번호 <span class="req">*</span></label>
+        <input id="fromPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="예) 010-9876-5432">
+      </div>
+      <div class="field">
+        <label for="fromAddr">보내는 분 주소</label>
+        <input id="fromAddr" type="text" autocomplete="off" placeholder="예) 경북 청송군 청송읍 사과로 1">
+      </div>
+      <div class="field" style="margin-bottom:6px">
+        <label for="paper">인쇄 용지</label>
+        <select id="paper">
+          <option value="a4">A4 용지 (한 장에 송장 2개)</option>
+          <option value="label">라벨 프린터 (100×150mm, 한 장에 1개)</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="perBox"> 박스가 여러 개면 박스마다 송장 1장씩 만들기</label>
+      <label class="check"><input type="checkbox" id="autoPdf"> 확인을 누르면 송장 PDF 파일 바로 저장하기</label>
+      <p class="hint">여기 입력한 내용은 이 컴퓨터에 기억돼서 다음부터 다시 쓸 필요 없어요.</p>
+    </details>
+
+    <div class="actions">
+      <button type="button" class="btn" id="btnReset">지우기</button>
+      <button type="button" class="btn primary" id="btnConfirm">✅ 확인 (송장 만들기)</button>
+    </div>
+  </section>
+
+  <!-- ================= 주문 목록 ================= -->
+  <section class="card" id="listCard">
+    <div class="list-head">
+      <h2>📋 주문 목록</h2>
+      <span class="summary" id="summary"></span>
+    </div>
+    <div class="list-tools">
+      <div class="seg" id="rangeSeg">
+        <button type="button" data-range="today" class="on">오늘</button>
+        <button type="button" data-range="all">전체</button>
+      </div>
+      <input type="search" id="search" placeholder="이름·전화·주소 검색">
+    </div>
+    <div class="list-actions">
+      <label class="check"><input type="checkbox" id="checkAll"> 전체</label>
+      <button type="button" class="btn small" id="btnBulkPdf">💾 PDF 저장</button>
+      <button type="button" class="btn small" id="btnBulkPrint">🖨️ 인쇄</button>
+      <button type="button" class="btn small" id="btnCsv">📊 엑셀 저장</button>
+      <button type="button" class="btn small" id="btnBulkDel">🗑️ 삭제</button>
+    </div>
+    <ul class="orders" id="orderList"></ul>
+    <p class="empty" id="emptyMsg">아직 주문이 없어요.<br>왼쪽에 주문을 입력하고 <b>확인</b>을 눌러보세요.</p>
+  </section>
+</main>
+
+<!-- 송장 미리보기 -->
+<div class="modal" id="pvModal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="pvTitle">
+    <div class="modal-head">
+      <h3 id="pvTitle">✅ 송장이 완성됐어요</h3>
+      <button class="x" data-close aria-label="닫기">×</button>
+    </div>
+    <div class="pv-note" id="pvNote"></div>
+    <div class="pv-img"><img id="pvImg" alt="송장 미리보기"></div>
+    <div class="pv-count" id="pvCount"></div>
+    <div class="pv-actions">
+      <button type="button" class="btn primary" id="pvPdf">💾 PDF 파일 저장</button>
+      <button type="button" class="btn green" id="pvPrint">🖨️ 인쇄하기</button>
+      <button type="button" class="btn" id="pvEdit">✏️ 고치기</button>
+      <button type="button" class="btn" id="pvNext">➕ 다음 주문 입력</button>
+    </div>
+  </div>
+</div>
+
+<!-- 우편번호 찾기 -->
+<div class="modal" id="zipModal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="zipTitle">
+    <div class="modal-head">
+      <h3 id="zipTitle">🔍 우편번호 찾기</h3>
+      <button class="x" data-close aria-label="닫기">×</button>
+    </div>
+    <p class="hint" style="margin:0 0 10px">입력한 주소로 검색했어요. <b>맞는 주소를 눌러주세요.</b></p>
+    <div id="zipEmbed"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="printArea"></div>
+
+<script>
+'use strict';
+
+/* =========================================================
+   기본 설정
+   ========================================================= */
+const CHOICES = {
+  variety: { opts: ['부사(후지)', '홍로', '감홍', '시나노골드', '아리수', '양광', '홍옥'], other: true },
+  unit:    { opts: ['박스', '개'], def: '박스' },
+  weight:  { opts: ['안 씀', '3kg', '5kg', '10kg'], other: true, def: '안 씀' },
+};
+const KEYS = {
+  orders: 'appleInvoice.orders',
+  sender: 'appleInvoice.sender',
+  settings: 'appleInvoice.settings',
+  seq: 'appleInvoice.seq',
+};
+
+const $ = (sel, el = document) => el.querySelector(sel);
+const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
+
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch { return false; }
+  },
+};
+
+let orders = store.get(KEYS.orders, []);
+let settings = Object.assign({ paper: 'a4', perBox: true, autoPdf: true, lastVariety: '', lastWeight: '안 씀', lastUnit: '박스' },
+                             store.get(KEYS.settings, {}));
+let editingId = null;
+let previewId = null;
+let previewFromList = false;
+let range = 'today';
+
+/* =========================================================
+   작은 도우미들
+   ========================================================= */
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = (n, len = 2) => String(n).padStart(len, '0');
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function formatPhone(v) {
+  const d = String(v).replace(/\D/g, '').slice(0, 11);
+  if (d.startsWith('02')) {
+    if (d.length <= 2) return d;
+    if (d.length <= 5) return `${d.slice(0, 2)}-${d.slice(2)}`;
+    if (d.length <= 9) return `${d.slice(0, 2)}-${d.slice(2, 5)}-${d.slice(5)}`;
+    return `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6)}`;
+  }
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return `${d.slice(0, 3)}-${d.slice(3)}`;
+  if (d.length <= 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`;
+  return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
+}
+const itemText = o => [o.item.variety, o.item.weight, `${o.item.qty}${o.item.unit}`].filter(Boolean).join(' · ');
+const fullAddr = o => [o.to.addr, o.to.addr2].filter(Boolean).join(' ');
+const safeName = s => String(s).replace(/[\\/:*?"<>|\s]+/g, '_');
+
+let toastTimer;
+function toast(msg, type = '') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = 'toast'; }, 2600);
+}
+
+function download(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+
+/* 주소를 "기본 주소"와 "상세 주소(동·호수)"로 나눠요 */
+function splitAddress(s) {
+  s = String(s || '').trim().replace(/\s+/g, ' ');
+  const m = s.match(/^(.*?[가-힣0-9]+(?:로|길|동|리|가) ?\d+(?:-\d+)?)(?:\s*[,\s]\s*(.*))?$/);
+  if (!m) return { base: s, detail: '' };
+  return { base: m[1].trim(), detail: (m[2] || '').trim() };
+}
+
+/* =========================================================
+   선택 버튼 (칩)
+   ========================================================= */
+function buildChips() {
+  for (const [name, cfg] of Object.entries(CHOICES)) {
+    const box = $(`[data-chips="${name}"]`);
+    const values = cfg.other ? [...cfg.opts, '기타'] : cfg.opts;
+    box.innerHTML = values.map(v =>
+      `<label class="chip"><input type="radio" name="${name}" value="${esc(v)}"><span>${esc(v === '기타' ? '기타 (직접 입력)' : v)}</span></label>`
+    ).join('') + (cfg.other ? `<input class="other-input" id="${name}Other" type="text" placeholder="직접 입력" hidden>` : '');
+    box.addEventListener('change', e => {
+      if (e.target.name !== name) return;
+      box.classList.remove('invalid');
+      if (cfg.other) {
+        const other = $(`#${name}Other`);
+        other.hidden = e.target.value !== '기타';
+        if (!other.hidden) other.focus();
+      }
+    });
+  }
+}
+function getChoice(name) {
+  const r = $(`input[name="${name}"]:checked`);
+  if (!r) return '';
+  if (r.value === '기타') return $(`#${name}Other`).value.trim();
+  if (r.value === '안 씀') return '';
+  return r.value;
+}
+function setChoice(name, value) {
+  const cfg = CHOICES[name];
+  const radios = $$(`input[name="${name}"]`);
+  if (!value) value = cfg.def || '';
+  if (!value) { radios.forEach(r => { r.checked = false; }); if (cfg.other) $(`#${name}Other`).hidden = true; return; }
+  const known = cfg.opts.includes(value);
+  const target = known ? value : (cfg.other ? '기타' : cfg.def);
+  radios.forEach(r => { r.checked = r.value === target; });
+  if (cfg.other) {
+    const other = $(`#${name}Other`);
+    other.hidden = target !== '기타';
+    other.value = known ? '' : value;
+  }
+}
+
+/* =========================================================
+   입력 폼
+   ========================================================= */
+function loadSender() {
+  const s = store.get(KEYS.sender, {});
+  $('#fromName').value = s.name || '';
+  $('#fromPhone').value = s.phone || '';
+  $('#fromAddr').value = s.addr || '';
+  $('#paper').value = settings.paper;
+  $('#perBox').checked = settings.perBox;
+  $('#autoPdf').checked = settings.autoPdf;
+  updateSenderNote();
+  if (!s.name || !s.phone) $('#senderBox').open = true;
+}
+function updateSenderNote() {
+  const name = $('#fromName').value.trim();
+  $('#senderNote').textContent = name ? `(${name})` : '(처음 한 번만 입력)';
+}
+function saveSender() {
+  store.set(KEYS.sender, {
+    name: $('#fromName').value.trim(),
+    phone: formatPhone($('#fromPhone').value),
+    addr: $('#fromAddr').value.trim(),
+  });
+  updateSenderNote();
+}
+function saveSettings() {
+  settings.paper = $('#paper').value;
+  settings.perBox = $('#perBox').checked;
+  settings.autoPdf = $('#autoPdf').checked;
+  store.set(KEYS.settings, settings);
+}
+
+function readForm() {
+  return {
+    to: {
+      name: $('#toName').value.trim(),
+      phone: formatPhone($('#toPhone').value),
+      zip: $('#toZip').value.replace(/\D/g, '').slice(0, 5),
+      addr: $('#toAddr').value.trim(),
+      addr2: $('#toAddr2').value.trim(),
+    },
+    item: {
+      variety: getChoice('variety'),
+      weight: getChoice('weight'),
+      qty: Math.max(0, parseInt($('#qty').value, 10) || 0),
+      unit: getChoice('unit') || '박스',
+    },
+    memo: $('#memo').value.trim(),
+    from: {
+      name: $('#fromName').value.trim(),
+      phone: formatPhone($('#fromPhone').value),
+      addr: $('#fromAddr').value.trim(),
+    },
+  };
+}
+
+function validate(data) {
+  $$('.invalid').forEach(el => el.classList.remove('invalid'));
+  const errors = [];
+  const need = (ok, el, msg) => { if (!ok) errors.push({ el, msg }); };
+  need(data.to.name, $('#toName'), '받는 분 이름을 입력해주세요');
+  need(data.to.phone.replace(/\D/g, '').length >= 9, $('#toPhone'), '전화번호를 확인해주세요');
+  need(data.item.variety, $('#varietyChips'), '사과 종류를 골라주세요');
+  need(data.item.qty >= 1, $('#qty'), '개수를 1 이상으로 입력해주세요');
+  need(data.to.addr, $('#toAddr'), '주소를 입력해주세요');
+  need(data.from.name, $('#fromName'), '보내는 분(농장 이름)을 한 번만 입력해주세요');
+  need(data.from.phone.replace(/\D/g, '').length >= 9, $('#fromPhone'), '보내는 분 전화번호를 한 번만 입력해주세요');
+  if (!errors.length) return true;
+  errors.forEach(e => e.el.classList.add('invalid'));
+  const first = errors[0];
+  if (first.el.closest('details')) first.el.closest('details').open = true;
+  first.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (first.el.focus && first.el.tagName === 'INPUT') setTimeout(() => first.el.focus(), 300);
+  toast(first.msg, 'error');
+  return false;
+}
+
+function fillForm(o) {
+  $('#toName').value = o.to.name;
+  $('#toPhone').value = o.to.phone;
+  $('#toZip').value = o.to.zip;
+  $('#toAddr').value = o.to.addr;
+  $('#toAddr2').value = o.to.addr2;
+  setChoice('variety', o.item.variety);
+  setChoice('weight', o.item.weight);
+  setChoice('unit', o.item.unit);
+  $('#qty').value = o.item.qty;
+  $('#memo').value = o.memo;
+  if (o.item.weight || o.memo) $('#moreBox').open = true;
+}
+
+function resetForm() {
+  ['#toName', '#toPhone', '#toZip', '#toAddr', '#toAddr2', '#memo', '#pasteText'].forEach(s => { $(s).value = ''; });
+  $('#qty').value = 1;
+  setChoice('variety', settings.lastVariety);
+  setChoice('weight', settings.lastWeight);
+  setChoice('unit', settings.lastUnit);
+  $$('.invalid').forEach(el => el.classList.remove('invalid'));
+  setEditing(null);
+}
+
+function setEditing(id) {
+  editingId = id;
+  const o = id && orders.find(x => x.id === id);
+  $('#editBanner').hidden = !o;
+  if (o) $('#editNo').textContent = o.no;
+}
+
+/* =========================================================
+   주문 문자 자동 입력
+   ========================================================= */
+function parseOrderText(text) {
+  const r = {};
+  const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const phoneRe = /(01[016789]|0[2-6]\d?)[-.\s]?\d{3,4}[-.\s]?\d{4}/;
+  const labeled = re => {
+    for (const l of lines) { const m = l.match(re); if (m) return m[1].trim(); }
+    return '';
+  };
+  const stripPhone = s => s.replace(new RegExp(phoneRe.source, 'g'), '').replace(/\s{2,}/g, ' ').trim();
+
+  const phone = text.match(phoneRe);
+  if (phone) r.phone = formatPhone(phone[0]);
+
+  r.name = stripPhone(labeled(/^(?:받는\s*(?:분|사람|이)|수령인|수취인|이름|성함|성명)\s*[:：)]?\s*(.+)$/)).replace(/\s*님$/, '');
+  if (!r.name) {
+    const m = text.match(/([가-힣]{2,4})\s*(?:님)?\s*[,/]?\s*(?:01[016789]|0[2-6])/);
+    if (m) r.name = m[1];
+  }
+  if (!r.name) {
+    const l = lines.find(l => /^[가-힣]{2,4}(?:\s*님)?$/.test(l) && !/박스|상자|사과|부사|홍로|감홍|양광|홍옥|아리수/.test(l));
+    if (l) r.name = l.replace(/\s*님$/, '');
+  }
+
+  let addr = labeled(/^(?:주소|배송지|받는\s*주소)\s*[:：)]?\s*(.+)$/);
+  if (!addr) {
+    const region = /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|충청|전북|전남|전라|경북|경남|경상|제주)[가-힣]*\s+[가-힣]/;
+    const l = lines.find(l => region.test(l));
+    if (l) addr = l.slice(l.search(region));
+  }
+  if (addr) {
+    addr = stripPhone(addr);
+    const zip = addr.match(/\(?\b(\d{5})\b\)?/);
+    if (zip) { r.zip = zip[1]; addr = addr.replace(zip[0], '').trim(); }
+    const parts = splitAddress(addr);
+    r.addr = parts.base;
+    r.addr2 = parts.detail;
+  }
+  if (!r.zip) {
+    const zip = text.match(/우편\s*번호\s*[:：]?\s*(\d{5})/);
+    if (zip) r.zip = zip[1];
+  }
+
+  const varieties = { '부사(후지)': /부사|후지/, '홍로': /홍로/, '감홍': /감홍/, '시나노골드': /시나노\s*골드/, '아리수': /아리수/, '양광': /양광/, '홍옥': /홍옥/ };
+  for (const [v, re] of Object.entries(varieties)) { if (re.test(text)) { r.variety = v; break; } }
+
+  const w = text.match(/(\d+(?:\.\d+)?)\s*(?:kg|키로|킬로)/i);
+  if (w) r.weight = `${w[1]}kg`;
+
+  const q = text.match(/(\d+)\s*(박스|상자|box|개|과)(?![가-힣])/i);
+  if (q) { r.qty = parseInt(q[1], 10); r.unit = /개|과/.test(q[2]) ? '개' : '박스'; }
+
+  const memo = labeled(/^(?:배송\s*메모|요청\s*사항|요청|메모|부탁)\s*[:：)]?\s*(.+)$/);
+  if (memo) r.memo = memo;
+  return r;
+}
+
+function applyParsed() {
+  const text = $('#pasteText').value.trim();
+  if (!text) { toast('주문 문자를 먼저 붙여넣어 주세요', 'error'); return; }
+  const r = parseOrderText(text);
+  let n = 0;
+  const put = (sel, v) => { if (v) { $(sel).value = v; n++; } };
+  put('#toName', r.name);
+  put('#toPhone', r.phone);
+  put('#toAddr', r.addr);
+  put('#toAddr2', r.addr2);
+  put('#toZip', r.zip);
+  put('#memo', r.memo);
+  if (r.variety) { setChoice('variety', r.variety); n++; }
+  if (r.weight) { setChoice('weight', r.weight); n++; }
+  if (r.qty) { $('#qty').value = r.qty; setChoice('unit', r.unit); n++; }
+  if (r.memo || r.weight) $('#moreBox').open = true;
+  $$('.invalid').forEach(el => el.classList.remove('invalid'));
+  toast(n ? `${n}개 항목을 채웠어요. 맞는지 한 번 확인해주세요!` : '알아볼 수 있는 내용이 없어요. 직접 입력해주세요', n ? '' : 'error');
+}
+
+/* =========================================================
+   우편번호 찾기 (다음 우편번호 서비스)
+   ========================================================= */
+let zipResolve = null;
+function findZip() {
+  return new Promise(resolve => {
+    if (!(window.daum && daum.Postcode)) {
+      toast('우편번호 검색은 인터넷 연결이 필요해요. 직접 입력해도 돼요', 'error');
+      resolve(false);
+      return;
+    }
+    const { base, detail } = splitAddress($('#toAddr').value);
+    zipResolve = resolve;
+    const box = $('#zipEmbed');
+    box.innerHTML = '';
+    $('#zipModal').hidden = false;
+    new daum.Postcode({
+      width: '100%',
+      height: '100%',
+      oncomplete(data) {
+        const road = data.userSelectedType !== 'J';
+        let addr = road ? (data.roadAddress || data.address) : (data.jibunAddress || data.autoJibunAddress || data.address);
+        if (road && data.buildingName) addr += ` (${data.buildingName})`;
+        $('#toZip').value = data.zonecode;
+        $('#toAddr').value = addr;
+        if (!$('#toAddr2').value.trim() && detail) $('#toAddr2').value = detail;
+        $('#toZip').classList.remove('invalid');
+        $('#toAddr').classList.remove('invalid');
+        closeZip(true);
+        toast(`우편번호 ${data.zonecode} 를 찾았어요`);
+        if (!$('#toAddr2').value.trim()) $('#toAddr2').focus();
+      },
+    }).embed(box, { q: base, autoClose: false });
+  });
+}
+function closeZip(found) {
+  $('#zipModal').hidden = true;
+  $('#zipEmbed').innerHTML = '';
+  if (zipResolve) { zipResolve(found); zipResolve = null; }
+}
+
+/* =========================================================
+   송장 번호 / 주문 저장
+   ========================================================= */
+function nextInvoiceNo() {
+  const key = today().replace(/-/g, '').slice(2);  // 261031
+  const seq = store.get(KEYS.seq, {});
+  const used = orders.filter(o => o.no.startsWith(`AP${key}-`)).map(o => parseInt(o.no.slice(-3), 10));
+  const n = Math.max(seq[key] || 0, 0, ...used) + 1;
+  seq[key] = n;
+  store.set(KEYS.seq, seq);
+  return `AP${key}-${pad(n, 3)}`;
+}
+function saveOrders() {
+  if (!store.set(KEYS.orders, orders)) toast('저장 공간에 저장하지 못했어요. 엑셀 저장으로 백업해주세요', 'error');
+}
+
+async function onConfirm() {
+  saveSettings();
+  let data = readForm();
+  if (!validate(data)) return;
+
+  if (!data.to.zip) {
+    const found = await findZip();
+    if (!found && !confirm('우편번호 없이 송장을 만들까요?')) return;
+    data = readForm();
+  }
+
+  saveSender();
+  let order;
+  if (editingId && (order = orders.find(o => o.id === editingId))) {
+    Object.assign(order, data, { updatedAt: new Date().toISOString() });
+  } else {
+    order = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      no: nextInvoiceNo(),
+      date: today(),
+      createdAt: new Date().toISOString(),
+      ...data,
+    };
+    orders.unshift(order);
+  }
+  settings.lastVariety = data.item.variety;
+  settings.lastWeight = data.item.weight || '안 씀';
+  settings.lastUnit = data.item.unit;
+  saveSettings();
+  saveOrders();
+  setEditing(null);
+  renderList();
+  openPreview(order, { autoSave: settings.autoPdf });
+}
+
+/* =========================================================
+   송장 그리기 (100 × 150mm)
+   ========================================================= */
+const U = 12;                       // 1mm = 12px (약 300dpi)
+const LABEL_W = 100, LABEL_H = 150; // mm
+const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", "Noto Sans CJK KR", "Nanum Gothic", "WenQuanYi Zen Hei", sans-serif';
+
+/* Code128-B 바코드 무늬 (막대·공백 폭) */
+const C128 = ('212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 221312 231212 112232 122132 122231 113222 ' +
+  '123122 123221 223211 221132 221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 212123 212321 232121 111323 ' +
+  '131123 131321 112313 132113 132311 211313 231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 231131 213113 ' +
+  '213311 213131 311123 311321 331121 312113 312311 332111 314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 ' +
+  '112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 ' +
+  '421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 ' +
+  '2331112').split(' ');
+function code128(text) {
+  const codes = [104, ...[...text].map(ch => ch.charCodeAt(0) - 32)];
+  const check = codes.reduce((sum, c, i) => sum + c * (i || 1), 0) % 103;
+  return [...codes, check, 106].map(c => C128[c]).join('');
+}
+function drawBarcode(ctx, text, x, y, maxW, h) {
+  const widths = code128(text);
+  const modules = [...widths].reduce((a, d) => a + Number(d), 0);
+  const mw = Math.max(1, Math.floor(maxW / modules));
+  let cx = Math.round(x);
+  [...widths].forEach((d, i) => {
+    const w = Number(d) * mw;
+    if (i % 2 === 0) ctx.fillRect(cx, Math.round(y), w, Math.round(h));
+    cx += w;
+  });
+  return modules * mw;
+}
+
+function setFont(ctx, mm, weight = 400) { ctx.font = `${weight} ${mm * U}px ${FONT}`; }
+function wrapLines(ctx, text, maxW) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text).split(/\s+/).filter(Boolean)) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width <= maxW) { line = test; continue; }
+    if (line) lines.push(line);
+    line = '';
+    for (const ch of word) {            // 너무 긴 낱말은 글자 단위로 자르기
+      if (line && ctx.measureText(line + ch).width > maxW) { lines.push(line); line = ''; }
+      line += ch;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+/* 글자가 칸에 맞도록 크기를 줄여가며 그려요. 그린 높이(mm)를 돌려줘요 */
+function drawText(ctx, text, x, y, maxW, mm, { weight = 400, maxLines = 1, lineH = 1.25, align = 'left', minScale = 0.55 } = {}) {
+  if (!text) return 0;
+  let size = mm, lines;
+  for (;;) {
+    setFont(ctx, size, weight);
+    lines = wrapLines(ctx, text, maxW * U);
+    if (lines.length <= maxLines || size <= mm * minScale) break;
+    size -= 0.1;
+  }
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    let last = lines[maxLines - 1];
+    while (last && ctx.measureText(last + '…').width > maxW * U) last = last.slice(0, -1);
+    lines[maxLines - 1] = last + '…';
+  }
+  ctx.textAlign = align;
+  const ax = align === 'center' ? x + maxW / 2 : align === 'right' ? x + maxW : x;
+  lines.forEach((l, i) => ctx.fillText(l, ax * U, (y + i * size * lineH) * U));
+  ctx.textAlign = 'left';
+  return lines.length * size * lineH;
+}
+function hLine(ctx, y, thick = 0.3, x1 = 2, x2 = LABEL_W - 2) { ctx.fillRect(x1 * U, (y - thick / 2) * U, (x2 - x1) * U, thick * U); }
+function vLine(ctx, x, y1, y2, thick = 0.3) { ctx.fillRect((x - thick / 2) * U, y1 * U, thick * U, (y2 - y1) * U); }
+function tag(ctx, text, x, y) {
+  setFont(ctx, 2.9, 800);
+  const w = ctx.measureText(text).width / U + 3;
+  ctx.fillStyle = '#000';
+  roundRect(ctx, x, y, w, 5, 0.8, true);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, (x + 1.5) * U, (y + 1.05) * U);
+  ctx.fillStyle = '#000';
+  return w;
+}
+function roundRect(ctx, x, y, w, h, r, fill) {
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(x * U, y * U, w * U, h * U, r * U) : ctx.rect(x * U, y * U, w * U, h * U);
+  fill ? ctx.fill() : ctx.stroke();
+}
+
+function renderLabel(o, boxNo, boxTotal) {
+  const c = document.createElement('canvas');
+  c.width = LABEL_W * U;
+  c.height = LABEL_H * U;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#000';
+  ctx.strokeStyle = '#000';
+  ctx.textBaseline = 'top';
+  const L = 6, R = LABEL_W - 6, W = R - L;
+
+  // 테두리
+  ctx.lineWidth = 0.6 * U;
+  roundRect(ctx, 2, 2, LABEL_W - 4, LABEL_H - 4, 1.5, false);
+
+  // ① 머리: 제목 + 송장번호
+  drawText(ctx, '사과 택배', L, 4.6, 45, 7, { weight: 900 });
+  drawText(ctx, '송장번호', R - 45, 4.2, 45, 2.7, { align: 'right' });
+  drawText(ctx, o.no, R - 45, 7.6, 45, 4.4, { weight: 800, align: 'right' });
+  hLine(ctx, 15, 0.6);
+
+  // ② 바코드 + 박스 번호
+  const bw = drawBarcode(ctx, o.no, L * U, 17.3 * U, 58 * U, 9.5 * U) / U;
+  drawText(ctx, o.no.split('').join(' '), L, 27.3, bw, 2.4, { align: 'center' });
+  const qtyText = boxTotal > 1 ? `${boxNo} / ${boxTotal}` : `${o.item.qty}${o.item.unit}`;
+  ctx.lineWidth = 0.5 * U;
+  roundRect(ctx, 68, 17.5, R - 68, 12, 1.2, false);
+  if (boxTotal > 1) {
+    drawText(ctx, '박스', 68, 18.4, R - 68, 2.5, { align: 'center' });
+    drawText(ctx, qtyText, 69, 21.6, R - 70, 6, { weight: 900, align: 'center' });
+  } else {
+    drawText(ctx, qtyText, 69, 20.3, R - 70, 6.5, { weight: 900, align: 'center' });
+  }
+  hLine(ctx, 31.5, 0.6);
+
+  // ③ 받는 분
+  tag(ctx, '받는 분', L, 34);
+  drawText(ctx, `${o.to.name} 님`, 24, 33, R - 24, 8, { weight: 900 });
+  drawText(ctx, o.to.phone, 24, 42.3, R - 24, 5.4, { weight: 800 });
+  ctx.lineWidth = 0.35 * U;
+  roundRect(ctx, L, 50, 34, 6.2, 0.8, false);
+  drawText(ctx, `우편번호 ${o.to.zip || '     '}`, L + 1.5, 51.1, 31, 3.8, { weight: 800 });
+  const hasDetail = !!o.to.addr2;
+  let ay = 58.5;
+  ay += drawText(ctx, o.to.addr, L, ay, W, 4.7, { weight: 800, maxLines: hasDetail ? 2 : 3, lineH: 1.28 });
+  if (hasDetail) drawText(ctx, o.to.addr2, L, ay + 0.4, W, 4.7, { weight: 800, maxLines: 1 });
+  hLine(ctx, 81, 0.6);
+
+  // ④ 보내는 분
+  tag(ctx, '보내는 분', L, 83.2);
+  drawText(ctx, `${o.from.name}  ${o.from.phone}`, 24.5, 83.2, R - 24.5, 3.7, { weight: 800 });
+  drawText(ctx, o.from.addr, 24.5, 88.6, R - 24.5, 3.2, { maxLines: 2 });
+  hLine(ctx, 97, 0.6);
+
+  // ⑤ 상품
+  const cols = [[L - 4, 54, '사과 종류', o.item.variety], [54, 74, '무게', o.item.weight || '-'], [74, R + 4, '개수', `${o.item.qty}${o.item.unit}`]];
+  cols.forEach(([x1, x2, head, val], i) => {
+    drawText(ctx, head, x1, 98.4, x2 - x1, 2.8, { align: 'center' });
+    drawText(ctx, val, x1 + 1.5, 106.2, x2 - x1 - 3, 6, { weight: 900, align: 'center' });
+    if (i) vLine(ctx, x1, 97, 118);
+  });
+  hLine(ctx, 102.6, 0.25);
+  hLine(ctx, 118, 0.6);
+
+  // ⑥ 배송 메모
+  tag(ctx, '배송 메모', L, 120.2);
+  drawText(ctx, o.memo || '-', 25, 120.2, R - 25, 3.7, { weight: 700, maxLines: 3, lineH: 1.3 });
+  hLine(ctx, 134.5, 0.6);
+
+  // ⑦ 아래쪽
+  drawText(ctx, `주문일 ${o.date.replace(/-/g, '.')}`, L, 136.8, 40, 2.9);
+  drawText(ctx, boxTotal > 1 ? `총 ${boxTotal}박스` : '사과(농산물)', L, 141.2, 40, 2.9);
+  drawText(ctx, '농산물 · 취급주의', R - 50, 136.4, 50, 4.2, { weight: 900, align: 'right' });
+  drawText(ctx, '던지지 마세요 · 눕히지 마세요', R - 50, 141.6, 50, 2.9, { weight: 700, align: 'right' });
+  return c;
+}
+
+function labelsFor(o) {
+  const multi = o.item.unit === '박스' && settings.perBox && o.item.qty > 1;
+  const total = multi ? Math.min(o.item.qty, 99) : 1;
+  return Array.from({ length: total }, (_, i) => renderLabel(o, i + 1, multi ? total : 1));
+}
+
+/* =========================================================
+   PDF 파일 만들기 (프로그램 설치 없이 직접 만들어요)
+   ========================================================= */
+function dataUrlToBytes(url) {
+  const bin = atob(url.split(',')[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function buildPDF(pages) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let len = 0;
+  const add = d => { const b = typeof d === 'string' ? enc.encode(d) : d; parts.push(b); len += b.length; };
+  const obj = (n, ...body) => { offsets[n] = len; add(`${n} 0 obj\n`); body.forEach(add); add('\nendobj\n'); };
+  const f = n => n.toFixed(2);
+
+  let next = 3;
+  const plan = pages.map(p => ({ page: next++, content: next++, images: p.images.map(() => next++) }));
+  add('%PDF-1.4\n');
+  obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+  obj(2, `<< /Type /Pages /Kids [${plan.map(p => `${p.page} 0 R`).join(' ')}] /Count ${pages.length} >>`);
+  pages.forEach((p, i) => {
+    const ids = plan[i];
+    const xobj = p.images.map((_, j) => `/Im${j} ${ids.images[j]} 0 R`).join(' ');
+    obj(ids.page, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${f(p.w)} ${f(p.h)}] /Resources << /XObject << ${xobj} >> >> /Contents ${ids.content} 0 R >>`);
+    const draw = p.images.map((im, j) => `q ${f(im.w)} 0 0 ${f(im.h)} ${f(im.x)} ${f(p.h - im.y - im.h)} cm /Im${j} Do Q`).join('\n');
+    obj(ids.content, `<< /Length ${enc.encode(draw).length} >>\nstream\n${draw}\nendstream`);
+    p.images.forEach((im, j) => obj(ids.images[j],
+      `<< /Type /XObject /Subtype /Image /Width ${im.pxW} /Height ${im.pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${im.jpeg.length} >>\nstream\n`,
+      im.jpeg, '\nendstream'));
+  });
+  const xrefAt = len;
+  let xref = `xref\n0 ${next}\n0000000000 65535 f \n`;
+  for (let n = 1; n < next; n++) xref += `${pad(offsets[n], 10)} 00000 n \n`;
+  add(`${xref}trailer\n<< /Size ${next} /Root 1 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
+  return new Blob(parts, { type: 'application/pdf' });
+}
+function labelsPDF(canvases) {
+  const PT = 72 / 25.4;   // mm → pt
+  const img = (c, x, y) => ({ jpeg: dataUrlToBytes(c.toDataURL('image/jpeg', 0.92)), pxW: c.width, pxH: c.height, x: x * PT, y: y * PT, w: LABEL_W * PT, h: LABEL_H * PT });
+  const pages = [];
+  if (settings.paper === 'a4') {
+    for (let i = 0; i < canvases.length; i += 2) {
+      const group = canvases.slice(i, i + 2);
+      const gap = 12;
+      let x = (297 - (group.length * LABEL_W + (group.length - 1) * gap)) / 2;
+      pages.push({ w: 297 * PT, h: 210 * PT, images: group.map(c => { const im = img(c, x, 30); x += LABEL_W + gap; return im; }) });
+    }
+  } else {
+    canvases.forEach(c => pages.push({ w: LABEL_W * PT, h: LABEL_H * PT, images: [img(c, 0, 0)] }));
+  }
+  return buildPDF(pages);
+}
+function savePDF(list) {
+  if (!list.length) { toast('저장할 주문을 골라주세요', 'error'); return; }
+  const canvases = list.flatMap(labelsFor);
+  const name = list.length === 1
+    ? `송장_${list[0].no}_${safeName(list[0].to.name)}.pdf`
+    : `송장_${today()}_${list.length}건.pdf`;
+  download(labelsPDF(canvases), name);
+  const now = new Date().toISOString();
+  list.forEach(o => { o.savedAt = now; });
+  saveOrders();
+  renderList();
+  toast(`💾 ${name} 파일을 저장했어요 (다운로드 폴더)`);
+}
+
+/* =========================================================
+   인쇄
+   ========================================================= */
+async function printOrders(list) {
+  if (!list.length) { toast('인쇄할 주문을 골라주세요', 'error'); return; }
+  const canvases = list.flatMap(labelsFor);
+  const perSheet = settings.paper === 'a4' ? 2 : 1;
+  const area = $('#printArea');
+  area.className = `paper-${settings.paper}`;
+  area.innerHTML = '';
+  const imgs = [];
+  for (let i = 0; i < canvases.length; i += perSheet) {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    canvases.slice(i, i + perSheet).forEach(c => {
+      const im = new Image();
+      im.src = c.toDataURL('image/png');
+      imgs.push(im);
+      sheet.appendChild(im);
+    });
+    area.appendChild(sheet);
+  }
+  $('#pageStyle').textContent = perSheet === 2
+    ? '@page { size: A4 landscape; margin: 8mm; }'
+    : '@page { size: 100mm 150mm; margin: 0; }';
+  await Promise.all(imgs.map(im => (im.decode ? im.decode().catch(() => {}) : null)));
+  window.print();
+  const now = new Date().toISOString();
+  list.forEach(o => { o.printedAt = now; });
+  saveOrders();
+  renderList();
+}
+
+/* =========================================================
+   미리보기 팝업
+   ========================================================= */
+function openPreview(o, { autoSave = false, fromList = false } = {}) {
+  previewId = o.id;
+  previewFromList = fromList;
+  $('#pvTitle').textContent = fromList ? '📄 송장 보기' : '✅ 송장이 완성됐어요';
+  $('#pvNext').textContent = fromList ? '닫기' : '➕ 다음 주문 입력';
+  const labels = labelsFor(o);
+  $('#pvImg').src = labels[0].toDataURL('image/png');
+  $('#pvCount').textContent = labels.length > 1 ? `박스마다 1장씩, 송장 ${labels.length}장이 만들어져요 (그림은 첫 장)` : '';
+  $('#pvNote').innerHTML = `<b>${esc(o.to.name)}</b> 님 · ${esc(itemText(o))}<br>송장번호 <b>${esc(o.no)}</b>`;
+  $('#pvModal').hidden = false;
+  if (autoSave) {
+    savePDF([o]);
+    $('#pvNote').innerHTML += '<br>💾 PDF 파일을 <b>다운로드 폴더</b>에 저장했어요.';
+  }
+}
+function closePreview(resetAfter = true) {
+  $('#pvModal').hidden = true;
+  // 방금 만든 주문이면 입력칸을 비우고, 목록에서 연 송장이면 입력 중인 내용을 그대로 둬요
+  if (resetAfter && !previewFromList) resetForm();
+  previewId = null;
+}
+const previewOrder = () => orders.find(o => o.id === previewId);
+
+/* =========================================================
+   주문 목록
+   ========================================================= */
+function visibleOrders() {
+  const q = $('#search').value.trim().toLowerCase();
+  return orders.filter(o => {
+    if (range === 'today' && o.date !== today()) return false;
+    if (!q) return true;
+    return [o.no, o.to.name, o.to.phone, fullAddr(o), o.item.variety].join(' ').toLowerCase().includes(q)
+      || o.to.phone.replace(/\D/g, '').includes(q.replace(/\D/g, '') || '\u0000');
+  });
+}
+function selectedOrders() {
+  const ids = new Set($$('#orderList input[type=checkbox]:checked').map(c => c.value));
+  return orders.filter(o => ids.has(o.id));
+}
+function renderList() {
+  const list = visibleOrders();
+  const boxes = list.reduce((s, o) => s + (o.item.unit === '박스' ? o.item.qty : 0), 0);
+  $('#summary').textContent = `${range === 'today' ? '오늘' : '전체'} ${list.length}건${boxes ? ` · ${boxes}박스` : ''}`;
+  $('#emptyMsg').hidden = list.length > 0;
+  if (!list.length && orders.length && range === 'today' && !$('#search').value) {
+    $('#emptyMsg').innerHTML = '오늘 들어온 주문이 없어요.<br><b>전체</b>를 누르면 지난 주문도 볼 수 있어요.';
+  } else if (!list.length && orders.length) {
+    $('#emptyMsg').textContent = '찾는 주문이 없어요.';
+  }
+  $('#orderList').innerHTML = list.map(o => `
+    <li class="order">
+      <input type="checkbox" value="${o.id}" aria-label="${esc(o.to.name)} 선택">
+      <div>
+        <div class="o-top">
+          <span class="o-name">${esc(o.to.name)}</span>
+          <span class="o-phone">${esc(o.to.phone)}</span>
+          ${o.printedAt || o.savedAt ? `<span class="badge">${o.printedAt ? '인쇄함' : 'PDF 저장함'}</span>` : '<span class="badge wait">송장 준비</span>'}
+        </div>
+        <div class="o-item">🍎 ${esc(itemText(o))}</div>
+        <div class="o-addr">${o.to.zip ? `(${esc(o.to.zip)}) ` : ''}${esc(fullAddr(o))}</div>
+        <div class="o-meta">${esc(o.no)} · ${esc(o.date)}${o.memo ? ` · 메모: ${esc(o.memo)}` : ''}</div>
+        <div class="o-btns">
+          <button type="button" class="btn small" data-act="view" data-id="${o.id}">📄 송장 보기</button>
+          <button type="button" class="btn small" data-act="edit" data-id="${o.id}">✏️ 고치기</button>
+          <button type="button" class="btn small" data-act="del" data-id="${o.id}">🗑️ 삭제</button>
+        </div>
+      </div>
+    </li>`).join('');
+  $('#checkAll').checked = false;
+}
+
+function deleteOrders(list) {
+  if (!list.length) { toast('삭제할 주문을 골라주세요', 'error'); return; }
+  const msg = list.length === 1 ? `${list[0].to.name} 님 주문(${list[0].no})을 삭제할까요?` : `주문 ${list.length}건을 삭제할까요?`;
+  if (!confirm(msg)) return;
+  const ids = new Set(list.map(o => o.id));
+  orders = orders.filter(o => !ids.has(o.id));
+  if (ids.has(editingId)) resetForm();
+  saveOrders();
+  renderList();
+  toast('삭제했어요');
+}
+
+function exportCSV() {
+  const sel = selectedOrders();
+  const list = sel.length ? sel : visibleOrders();
+  if (!list.length) { toast('저장할 주문이 없어요', 'error'); return; }
+  const head = ['주문일', '송장번호', '받는분', '전화번호', '우편번호', '주소', '상세주소', '사과종류', '무게', '개수', '단위', '배송메모', '보내는분', '보내는분전화', '보내는분주소'];
+  const rows = list.map(o => [o.date, o.no, o.to.name, o.to.phone, o.to.zip, o.to.addr, o.to.addr2, o.item.variety, o.item.weight, o.item.qty, o.item.unit, o.memo, o.from.name, o.from.phone, o.from.addr]);
+  const cell = v => { const s = String(v ?? ''); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csv = '﻿' + [head, ...rows].map(r => r.map(cell).join(',')).join('\r\n');
+  const name = `사과주문_${today()}_${list.length}건.csv`;
+  download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), name);
+  toast(`📊 ${name} 파일을 저장했어요 (엑셀로 열려요)`);
+}
+
+/* =========================================================
+   버튼 연결
+   ========================================================= */
+function init() {
+  buildChips();
+  loadSender();
+  resetForm();
+  renderList();
+
+  $('#btnConfirm').addEventListener('click', onConfirm);
+  $('#btnReset').addEventListener('click', () => { if (confirm('입력한 내용을 지울까요?')) resetForm(); });
+  $('#btnCancelEdit').addEventListener('click', resetForm);
+  $('#btnParse').addEventListener('click', applyParsed);
+  $('#btnZip').addEventListener('click', () => {
+    if (!$('#toAddr').value.trim()) { toast('주소를 먼저 입력해주세요', 'error'); $('#toAddr').focus(); return; }
+    findZip();
+  });
+
+  $$('.stepper button').forEach(b => b.addEventListener('click', () => {
+    const q = $('#qty');
+    q.value = Math.min(999, Math.max(1, (parseInt(q.value, 10) || 0) + Number(b.dataset.step)));
+    q.classList.remove('invalid');
+  }));
+  ['#toPhone', '#fromPhone'].forEach(s => $(s).addEventListener('blur', e => { e.target.value = formatPhone(e.target.value); }));
+  $('#toAddr').addEventListener('input', () => { $('#toZip').value = ''; });  // 주소가 바뀌면 우편번호를 다시 찾아요
+  $('#toZip').addEventListener('input', e => { e.target.value = e.target.value.replace(/\D/g, '').slice(0, 5); });
+  $$('#formCard input').forEach(el => el.addEventListener('input', () => el.classList.remove('invalid')));
+  ['#fromName', '#fromPhone', '#fromAddr'].forEach(s => $(s).addEventListener('change', saveSender));
+  ['#paper', '#perBox', '#autoPdf'].forEach(s => $(s).addEventListener('change', saveSettings));
+
+  // 미리보기 팝업
+  $('#pvPdf').addEventListener('click', () => { const o = previewOrder(); if (o) savePDF([o]); });
+  $('#pvPrint').addEventListener('click', () => { const o = previewOrder(); if (o) printOrders([o]); });
+  $('#pvEdit').addEventListener('click', () => {
+    const o = previewOrder();
+    closePreview(false);
+    if (o) { fillForm(o); setEditing(o.id); $('#formCard').scrollIntoView({ behavior: 'smooth' }); }
+  });
+  $('#pvNext').addEventListener('click', () => { closePreview(); $('#toName').focus(); });
+
+  // 팝업 닫기 (× 버튼, 바깥 클릭, Esc)
+  $$('.modal').forEach(m => m.addEventListener('click', e => {
+    if (e.target === m || e.target.closest('[data-close]')) m.id === 'zipModal' ? closeZip(false) : closePreview();
+  }));
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('#zipModal').hidden) closeZip(false);
+    else if (!$('#pvModal').hidden) closePreview();
+  });
+
+  // 목록
+  $('#rangeSeg').addEventListener('click', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    range = b.dataset.range;
+    $$('#rangeSeg button').forEach(x => x.classList.toggle('on', x === b));
+    renderList();
+  });
+  $('#search').addEventListener('input', renderList);
+  $('#checkAll').addEventListener('change', e => { $$('#orderList input[type=checkbox]').forEach(c => { c.checked = e.target.checked; }); });
+  $('#orderList').addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]');
+    if (!b) return;
+    const o = orders.find(x => x.id === b.dataset.id);
+    if (!o) return;
+    if (b.dataset.act === 'view') openPreview(o, { fromList: true });
+    if (b.dataset.act === 'edit') { fillForm(o); setEditing(o.id); $('#formCard').scrollIntoView({ behavior: 'smooth' }); toast('고친 뒤 확인을 누르면 같은 송장번호로 저장돼요'); }
+    if (b.dataset.act === 'del') deleteOrders([o]);
+  });
+  $('#btnBulkPdf').addEventListener('click', () => savePDF(selectedOrders()));
+  $('#btnBulkPrint').addEventListener('click', () => printOrders(selectedOrders()));
+  $('#btnCsv').addEventListener('click', exportCSV);
+  $('#btnBulkDel').addEventListener('click', () => deleteOrders(selectedOrders()));
+
+  if (!store.set('appleInvoice.test', 1)) toast('이 브라우저는 주문을 기억하지 못해요. 엑셀 저장을 꼭 해주세요', 'error');
+}
+init();
+</script>
+</body>
+</html>
