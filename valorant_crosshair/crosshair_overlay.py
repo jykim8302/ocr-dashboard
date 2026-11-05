@@ -1,7 +1,11 @@
 """
 발로란트 조준선 오버레이
 
-발로란트 조준선 코드를 붙여넣으면 화면 정중앙에 똑같은 조준선을 띄워 줍니다.
+화면 정중앙에 조준선을 띄워 줍니다. 조준선은 세 가지 방법으로 정할 수 있어요.
+- 발로란트 조준선 코드 붙여넣기
+- 버튼/슬라이더로 직접 만들기 (만든 조준선은 발로란트 코드로 복사 가능)
+- 칸을 칠해서 직접 그리기
+
 - 항상 맨 위에 표시 (게임보다 위)
 - 마우스 클릭은 오버레이를 통과해 그대로 게임으로 전달
 - F8 키로 켜기/끄기
@@ -49,20 +53,27 @@ def parse_code(code):
     if not tokens or not tokens[0].isdigit():
         raise ValueError("올바른 조준선 코드가 아니에요. (예: 0;P;c;5;...)")
 
-    primary = {}
+    sections = {None: []}  # 구간 이름 -> [(키, 값)]
     section = None
     i = 1
     while i < len(tokens):
         tok = tokens[i]
         if tok in ("P", "A", "S"):  # 주무기 / 정조준 / 저격총 구간 시작
             section = tok
+            sections.setdefault(tok, [])
             i += 1
             continue
-        if i + 1 < len(tokens) and section == "P":
-            primary[tok] = tokens[i + 1]
+        if i + 1 < len(tokens):
+            sections[section].append((tok, tokens[i + 1]))
         i += 2
+    primary = dict(sections.get("P", []))
 
-    cfg = {}
+    # 화면에 안 그리는 값(사격 오차, 정조준/저격총 설정 등)은 코드 복사할 때 그대로 돌려주기
+    cfg = {
+        "general": sections[None],
+        "extra": [(k, v) for k, v in sections.get("P", []) if k not in DEFAULTS and k != "u"],
+        "others": [(s, pairs) for s, pairs in sections.items() if s not in (None, "P")],
+    }
     try:
         for key, default in DEFAULTS.items():
             cfg[key] = float(primary.get(key, default))
@@ -141,6 +152,49 @@ def render(cfg, scale=1.0):
     r, g, b = cfg["rgb"]
     for x0, y0, x1, y1, a in rects:
         paint(x0, y0, x1, y1, (r, g, b, alpha(a)))
+    return side, buf
+
+
+def make_code(cfg):
+    """설정 dict -> 발로란트 조준선 코드 (기본값과 다른 것만 적음)."""
+    def fmt(v):
+        return "%g" % round(v, 3)
+
+    hex_color = "%02X%02X%02X" % cfg["rgb"]
+    primary = []
+    if hex_color in COLORS:
+        if COLORS.index(hex_color) != DEFAULTS["c"]:
+            primary += ["c", str(COLORS.index(hex_color))]
+    else:
+        primary += ["c", "8", "u", hex_color + "FF"]
+    for key, default in DEFAULTS.items():
+        if key != "c" and round(cfg[key], 3) != default:
+            primary += [key, fmt(cfg[key])]
+    primary += [t for pair in cfg["extra"] for t in pair]
+
+    parts = ["0"] + [t for pair in cfg["general"] for t in pair]
+    if primary:
+        parts += ["P"] + primary
+    for name, pairs in cfg["others"]:
+        parts += [name] + [t for pair in pairs for t in pair]
+    return ";".join(parts)
+
+
+GRID = 41  # 그리기 칸 수 (가운데 칸 = 화면 정중앙)
+
+
+def render_pixels(pixels, scale=1.0):
+    """그린 그림 {(x, y): (r, g, b, a)} -> 정사각형 RGBA 이미지. 반환: (한 변 크기, bytearray)"""
+    side = max(1, round(GRID * scale))
+    buf = bytearray(side * side * 4)
+    for (cx, cy), rgba in pixels.items():
+        x0, x1 = round(cx * scale), max(round((cx + 1) * scale), round(cx * scale) + 1)
+        y0, y1 = round(cy * scale), max(round((cy + 1) * scale), round(cy * scale) + 1)
+        x1, y1 = min(x1, side), min(y1, side)
+        row = bytes(rgba) * (x1 - x0)
+        for y in range(y0, y1):
+            start = (y * side + x0) * 4
+            buf[start:start + len(row)] = row
     return side, buf
 
 
@@ -280,68 +334,186 @@ def save_settings(data):
     except OSError:
         pass
 
+# '만들기' 탭 구성: (제목, 켜기 키, [(키, 이름, 최소, 최대, 간격)])
+SECTIONS = [
+    ("테두리", "h", [("t", "두께", 1, 6, 1), ("o", "불투명도", 0, 1, 0.01)]),
+    ("중앙 점", "d", [("z", "두께", 1, 6, 1), ("a", "불투명도", 0, 1, 0.01)]),
+    ("안쪽 선", "0b", [("0l", "길이", 0, 20, 1), ("0t", "두께", 0, 10, 1),
+                      ("0o", "간격", 0, 20, 1), ("0a", "불투명도", 0, 1, 0.01)]),
+    ("바깥 선", "1b", [("1l", "길이", 0, 20, 1), ("1t", "두께", 0, 10, 1),
+                      ("1o", "간격", 0, 40, 1), ("1a", "불투명도", 0, 1, 0.01)]),
+]
+
 
 class App:
     PREVIEW = 220
     PREVIEW_BG = (70, 76, 82)
+    DRAW_BG = (43, 47, 51)
+    CELL = 9  # 그리기 칸 한 칸 크기(px)
 
     def __init__(self, root):
         import tkinter as tk
+        from tkinter import ttk
 
         self.tk = tk
         self.root = root
         self.overlay = Overlay() if IS_WINDOWS else None
-        self.cfg = None
         self.f8_down = False
+        self.loading = False
+        self.save_job = None
 
         settings = load_settings()
-        font = ("Malgun Gothic", 10)
+        try:
+            self.cfg = parse_code(settings.get("code", EXAMPLE_CODE))
+        except ValueError:
+            self.cfg = parse_code(EXAMPLE_CODE)
+        self.pixels = {}
+        for key, value in settings.get("pixels", {}).items():
+            try:
+                x, y = map(int, key.split(","))
+                self.pixels[(x, y)] = tuple(int(value[i:i + 2], 16) for i in (0, 2, 4, 6))
+            except ValueError:
+                continue
+        self.brush_rgb = (255, 0, 0)
+
+        self.font = ("Malgun Gothic", 10)
+        self.bold = ("Malgun Gothic", 11, "bold")
         root.title("발로란트 조준선 오버레이")
         root.resizable(False, False)
-        root.configure(padx=14, pady=12)
+        root.configure(padx=12, pady=10)
 
-        tk.Label(root, text="조준선 코드", font=(font[0], 11, "bold")).pack(anchor="w")
-        row = tk.Frame(root)
-        row.pack(fill="x", pady=(4, 6))
-        self.code_var = tk.StringVar(value=settings.get("code", EXAMPLE_CODE))
-        entry = tk.Entry(row, textvariable=self.code_var, width=46, font=("Consolas", 10))
-        entry.pack(side="left", fill="x", expand=True, ipady=3)
-        entry.bind("<Return>", lambda e: self.apply())
-        tk.Button(row, text="적용", width=6, command=self.apply).pack(side="left", padx=(6, 0))
+        left = tk.Frame(root)
+        left.grid(row=0, column=0, sticky="n")
+        right = tk.Frame(root)
+        right.grid(row=0, column=1, sticky="n", padx=(12, 0))
 
-        tk.Button(root, text="📋 복사한 코드 붙여넣고 바로 적용", font=font,
-                  command=self.paste_and_apply).pack(fill="x")
+        self.tabs = ttk.Notebook(left)
+        self.tabs.pack()
+        make_tab = tk.Frame(self.tabs, padx=8, pady=8)
+        draw_tab = tk.Frame(self.tabs, padx=8, pady=8)
+        self.tabs.add(make_tab, text="  ⚙ 만들기  ")
+        self.tabs.add(draw_tab, text="  ✏ 그리기  ")
+        self.build_make_tab(make_tab)
+        self.build_draw_tab(draw_tab)
 
-        self.canvas = tk.Canvas(root, width=self.PREVIEW, height=self.PREVIEW,
+        tk.Label(right, text="미리보기", font=self.bold).pack(anchor="w")
+        self.canvas = tk.Canvas(right, width=self.PREVIEW, height=self.PREVIEW,
                                 bg="#%02x%02x%02x" % self.PREVIEW_BG, highlightthickness=0)
-        self.canvas.pack(pady=10)
-
-        opts = tk.Frame(root)
-        opts.pack(fill="x")
+        self.canvas.pack(pady=(4, 8))
         self.show_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(opts, text="조준선 표시  (F8 로 켜기/끄기)", font=font,
+        tk.Checkbutton(right, text="조준선 표시  (F8 로 켜기/끄기)", font=self.font,
                        variable=self.show_var, command=self.update_visible).pack(anchor="w")
-        size_row = tk.Frame(opts)
+        size_row = tk.Frame(right)
         size_row.pack(fill="x")
-        tk.Label(size_row, text="크기", font=font).pack(side="left")
+        tk.Label(size_row, text="크기", font=self.font).pack(side="left")
         self.scale_var = tk.DoubleVar(value=settings.get("scale", 1.0))
         tk.Scale(size_row, from_=0.5, to=3.0, resolution=0.1, orient="horizontal",
-                 variable=self.scale_var, showvalue=True, length=230,
+                 variable=self.scale_var, length=180,
                  command=lambda v: self.redraw()).pack(side="left", padx=6)
-
-        self.status = tk.Label(root, text="", font=font)
+        self.status = tk.Label(right, text="", font=self.font, wraplength=self.PREVIEW,
+                               justify="left")
         self.status.pack(anchor="w", pady=(6, 0))
-        tip = ("※ 발로란트 설정 > 비디오 > 화면 모드를 '창 전체화면'으로 해야\n"
-               "   게임 위에 조준선이 보여요. (전체화면 모드에선 가려짐)")
+        tip = ("※ 지금 보고 있는 탭의 조준선이 화면에 나와요.\n\n"
+               "※ 발로란트 설정 > 비디오 > 화면 모드를 '창 전체화면'으로 해야 "
+               "게임 위에 보여요. (전체화면 모드에선 가려짐)")
         if not IS_WINDOWS:
             tip = "※ Windows 가 아니라서 미리보기만 동작해요."
-        tk.Label(root, text=tip, font=(font[0], 9), fg="#777", justify="left").pack(anchor="w")
+        tk.Label(right, text=tip, font=(self.font[0], 9), fg="#777", justify="left",
+                 wraplength=self.PREVIEW).pack(anchor="w", pady=(6, 0))
 
         root.protocol("WM_DELETE_WINDOW", self.quit)
-        self.apply()
+        self.tabs.select(1 if settings.get("mode") == "draw" else 0)
+        self.mode = "draw" if settings.get("mode") == "draw" else "make"
+        self.tabs.bind("<<NotebookTabChanged>>", self.on_tab)
+        self.load_vars()
+        self.redraw()
         if self.overlay:
             self.tick_hotkey()
             self.tick_top()
+
+    # ------------------------------------------------ 만들기 탭
+
+    def color_button(self, parent, hex_color, command):
+        b = self.tk.Label(parent, bg="#" + hex_color, width=2, relief="raised", bd=2,
+                          cursor="hand2")
+        b.bind("<Button-1>", lambda e: command(hex_color))
+        b.pack(side="left", padx=1)
+
+    def build_make_tab(self, f):
+        tk = self.tk
+        tk.Label(f, text="조준선 코드", font=self.bold).pack(anchor="w")
+        row = tk.Frame(f)
+        row.pack(fill="x", pady=(2, 4))
+        self.code_var = tk.StringVar(value=make_code(self.cfg))
+        entry = tk.Entry(row, textvariable=self.code_var, font=("Consolas", 10))
+        entry.pack(side="left", fill="x", expand=True, ipady=3)
+        entry.bind("<Return>", lambda e: self.apply_code())
+        tk.Button(row, text="적용", command=self.apply_code).pack(side="left", padx=(4, 0))
+        btns = tk.Frame(f)
+        btns.pack(fill="x")
+        tk.Button(btns, text="📋 복사한 코드 붙여넣기", font=self.font,
+                  command=self.paste_and_apply).pack(side="left", expand=True, fill="x")
+        tk.Button(btns, text="📄 코드 복사 (게임에 넣기)", font=self.font,
+                  command=self.copy_code).pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+        tk.Label(f, text="색상", font=self.bold).pack(anchor="w", pady=(10, 2))
+        colors = tk.Frame(f)
+        colors.pack(anchor="w")
+        for hex_color in COLORS:
+            self.color_button(colors, hex_color, self.set_color)
+        tk.Button(colors, text="🎨 직접 고르기", font=self.font,
+                  command=lambda: self.ask_color(self.cfg["rgb"], self.set_color)
+                  ).pack(side="left", padx=(8, 0))
+        self.swatch = tk.Label(colors, width=3, relief="sunken", bd=2)
+        self.swatch.pack(side="left", padx=6)
+
+        grid = tk.Frame(f)
+        grid.pack(fill="x", pady=(8, 0))
+        self.vars = {}
+        for n, (title, on_key, sliders) in enumerate(SECTIONS):
+            box = tk.LabelFrame(grid, text=title, font=self.font, padx=6, pady=2)
+            box.grid(row=n // 2, column=n % 2, sticky="nsew", padx=3, pady=3)
+            self.vars[on_key] = tk.BooleanVar()
+            tk.Checkbutton(box, text="켜기", font=self.font, variable=self.vars[on_key],
+                           command=self.on_builder).pack(anchor="w")
+            for key, name, lo, hi, step in sliders:
+                r = tk.Frame(box)
+                r.pack(fill="x")
+                tk.Label(r, text=name, width=6, anchor="w", font=self.font).pack(side="left")
+                self.vars[key] = tk.DoubleVar()
+                tk.Scale(r, from_=lo, to=hi, resolution=step, orient="horizontal",
+                         variable=self.vars[key], length=130,
+                         command=lambda v: self.on_builder()).pack(side="left")
+
+    def load_vars(self):
+        """설정 -> 만들기 탭 버튼/슬라이더"""
+        self.loading = True
+        for key, var in self.vars.items():
+            var.set(bool(self.cfg[key]) if isinstance(var, self.tk.BooleanVar) else self.cfg[key])
+        self.swatch.configure(bg="#%02x%02x%02x" % self.cfg["rgb"])
+        self.loading = False
+
+    def on_builder(self):
+        """만들기 탭에서 뭔가 바꿀 때마다 바로 반영"""
+        if self.loading:
+            return
+        for key, var in self.vars.items():
+            self.cfg[key] = float(var.get())
+        self.code_var.set(make_code(self.cfg))
+        self.redraw()
+
+    def set_color(self, hex_color):
+        self.cfg["rgb"] = tuple(int(hex_color[k:k + 2], 16) for k in (0, 2, 4))
+        self.swatch.configure(bg="#" + hex_color)
+        self.code_var.set(make_code(self.cfg))
+        self.redraw()
+
+    def ask_color(self, current, command):
+        from tkinter import colorchooser
+
+        picked = colorchooser.askcolor(color="#%02x%02x%02x" % current, parent=self.root)
+        if picked and picked[1]:
+            command(picked[1][1:].upper())
 
     def set_status(self, text, ok=True):
         self.status.configure(text=text, fg="#1a7f37" if ok else "#c62828")
@@ -353,39 +525,183 @@ class App:
             self.set_status("클립보드가 비어 있어요.", ok=False)
             return
         self.code_var.set(text.strip())
-        self.apply()
+        self.apply_code()
 
-    def apply(self):
+    def apply_code(self):
         try:
             self.cfg = parse_code(self.code_var.get())
         except ValueError as e:
             self.set_status(str(e), ok=False)
             return
+        self.load_vars()
         self.redraw()
         self.set_status("✔ 적용됐어요! 화면 가운데를 확인하세요.")
 
-    def redraw(self):
-        if not self.cfg:
+    def copy_code(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(make_code(self.cfg))
+        self.set_status("✔ 코드를 복사했어요. 발로란트 설정 > 조준선 > 가져오기(Import)에 "
+                        "붙여넣으면 게임에도 똑같이 적용돼요.")
+
+    # ------------------------------------------------ 그리기 탭
+
+    def build_draw_tab(self, f):
+        tk = self.tk
+        top = tk.Frame(f)
+        top.pack(fill="x")
+        tk.Label(top, text="색", font=self.bold).pack(side="left", padx=(0, 4))
+        for hex_color in COLORS + ["000000"]:
+            self.color_button(top, hex_color, self.set_brush)
+        tk.Button(top, text="🎨", command=lambda: self.ask_color(self.brush_rgb, self.set_brush)
+                  ).pack(side="left", padx=(6, 0))
+        self.brush_swatch = tk.Label(top, width=3, relief="sunken", bd=2,
+                                     bg="#%02x%02x%02x" % self.brush_rgb)
+        self.brush_swatch.pack(side="left", padx=6)
+
+        opts = tk.Frame(f)
+        opts.pack(fill="x", pady=(4, 0))
+        tk.Label(opts, text="불투명도", font=self.font).pack(side="left")
+        self.brush_alpha = tk.DoubleVar(value=1.0)
+        tk.Scale(opts, from_=0.1, to=1.0, resolution=0.05, orient="horizontal",
+                 variable=self.brush_alpha, length=110).pack(side="left", padx=(4, 12))
+        tk.Label(opts, text="대칭", font=self.font).pack(side="left")
+        self.sym_var = tk.StringVar(value="8")
+        for value, text in (("1", "없음"), ("4", "4방향"), ("8", "+ 모양")):
+            tk.Radiobutton(opts, text=text, value=value, variable=self.sym_var,
+                           font=self.font).pack(side="left")
+
+        size = GRID * self.CELL
+        self.board = tk.Canvas(f, width=size, height=size, highlightthickness=1,
+                               highlightbackground="#555", cursor="crosshair",
+                               bg="#%02x%02x%02x" % self.DRAW_BG)
+        self.board.pack(pady=6)
+        mid = GRID // 2
+        self.cells = {}
+        for y in range(GRID):
+            for x in range(GRID):
+                line = "#596068" if (x, y) == (mid, mid) else (
+                    "#41474d" if mid in (x, y) else "#363b40")
+                self.cells[(x, y)] = self.board.create_rectangle(
+                    x * self.CELL, y * self.CELL, (x + 1) * self.CELL, (y + 1) * self.CELL,
+                    outline=line)
+        self.refresh_board()
+        for seq, erase in (("<Button-1>", False), ("<B1-Motion>", False),
+                           ("<Button-3>", True), ("<B3-Motion>", True)):
+            self.board.bind(seq, lambda e, er=erase: self.paint(e, er))
+
+        tk.Label(f, text="왼쪽 클릭: 그리기   오른쪽 클릭: 지우기   (가운데 칸 = 화면 정중앙)",
+                 font=(self.font[0], 9), fg="#777").pack()
+        btns = tk.Frame(f)
+        btns.pack(fill="x", pady=(4, 0))
+        tk.Button(btns, text="🗑 전체 지우기", font=self.font,
+                  command=self.clear_drawing).pack(side="left", expand=True, fill="x")
+        tk.Button(btns, text="⬇ '만들기' 조준선 가져오기", font=self.font,
+                  command=self.import_made).pack(side="left", expand=True, fill="x", padx=(4, 0))
+
+    def set_brush(self, hex_color):
+        self.brush_rgb = tuple(int(hex_color[k:k + 2], 16) for k in (0, 2, 4))
+        self.brush_swatch.configure(bg="#" + hex_color)
+
+    def blend(self, rgba, bg):
+        a = rgba[3] / 255
+        return "#%02x%02x%02x" % tuple(round(rgba[k] * a + bg[k] * (1 - a)) for k in range(3))
+
+    def refresh_board(self, cells=None):
+        for p in cells or self.cells:
+            rgba = self.pixels.get(p)
+            fill = self.blend(rgba, self.DRAW_BG) if rgba else ""
+            self.board.itemconfigure(self.cells[p], fill=fill)
+
+    def paint(self, event, erase):
+        x, y = event.x // self.CELL, event.y // self.CELL
+        if not (0 <= x < GRID and 0 <= y < GRID):
             return
+        m = GRID - 1
+        targets = {(x, y)}
+        if self.sym_var.get() in ("4", "8"):
+            targets |= {(m - x, y), (x, m - y), (m - x, m - y)}
+        if self.sym_var.get() == "8":
+            targets |= {(b, a) for a, b in targets}
+        rgba = (*self.brush_rgb, round(self.brush_alpha.get() * 255))
+        changed = False
+        for p in targets:
+            if erase:
+                changed |= self.pixels.pop(p, None) is not None
+            elif self.pixels.get(p) != rgba:
+                self.pixels[p] = rgba
+                changed = True
+        if changed:
+            self.refresh_board(targets)
+            self.redraw()
+            self.set_status("")
+
+    def clear_drawing(self):
+        from tkinter import messagebox
+
+        if self.pixels and messagebox.askyesno("전체 지우기", "그린 그림을 모두 지울까요?",
+                                               parent=self.root):
+            self.pixels.clear()
+            self.refresh_board()
+            self.redraw()
+
+    def import_made(self):
+        """'만들기' 탭의 조준선을 그리기 칸으로 옮겨서 고쳐 그릴 수 있게"""
+        from tkinter import messagebox
+
+        if self.pixels and not messagebox.askyesno(
+                "가져오기", "지금 그린 그림을 지우고 '만들기' 조준선을 가져올까요?", parent=self.root):
+            return
+        side, rgba = render(self.cfg, 1.0)
+        shift = GRID // 2 - side // 2
+        self.pixels.clear()
+        for y in range(side):
+            for x in range(side):
+                i = (y * side + x) * 4
+                gx, gy = x + shift, y + shift
+                if rgba[i + 3] and 0 <= gx < GRID and 0 <= gy < GRID:
+                    self.pixels[(gx, gy)] = tuple(rgba[i:i + 4])
+        self.refresh_board()
+        self.redraw()
+        self.set_status("✔ 가져왔어요. 이제 마음대로 고쳐 그려 보세요.")
+
+    # ------------------------------------------------ 화면 표시
+
+    def on_tab(self, _event=None):
+        self.mode = "draw" if self.tabs.index("current") == 1 else "make"
+        self.redraw()
+        if self.mode == "draw" and not self.pixels:
+            self.set_status("칸을 클릭해서 조준선을 그려 보세요.")
+
+    def redraw(self):
+        if not hasattr(self, "mode"):
+            return  # 아직 창을 만드는 중
         scale = self.scale_var.get()
-        side, rgba = render(self.cfg, scale)
+        if self.mode == "draw":
+            side, rgba = render_pixels(self.pixels, scale)
+        else:
+            side, rgba = render(self.cfg, scale)
         if self.overlay:
             self.overlay.draw(side, rgba)
         self.draw_preview(side, rgba)
-        save_settings({"code": self.code_var.get(), "scale": scale})
+        if self.save_job:
+            self.root.after_cancel(self.save_job)
+        self.save_job = self.root.after(500, self.save_now)
+
+    def save_now(self):
+        self.save_job = None
+        save_settings({
+            "code": make_code(self.cfg),
+            "scale": self.scale_var.get(),
+            "mode": self.mode,
+            "pixels": {"%d,%d" % p: "%02X%02X%02X%02X" % c for p, c in self.pixels.items()},
+        })
 
     def draw_preview(self, side, rgba):
-        # 회색 배경 위에 합성해서 3배 확대로 보여주기
-        br, bg, bb = self.PREVIEW_BG
+        # 회색 배경 위에 합성해서 확대해 보여주기
         rows = []
         for y in range(side):
-            row = []
-            for x in range(side):
-                i = (y * side + x) * 4
-                a = rgba[i + 3] / 255
-                row.append("#%02x%02x%02x" % (round(rgba[i] * a + br * (1 - a)),
-                                              round(rgba[i + 1] * a + bg * (1 - a)),
-                                              round(rgba[i + 2] * a + bb * (1 - a))))
+            row = [self.blend(rgba[(y * side + x) * 4:(y * side + x) * 4 + 4], self.PREVIEW_BG)
+                   for x in range(side)]
             rows.append("{" + " ".join(row) + "}")
         img = self.tk.PhotoImage(width=side, height=side)
         img.put(" ".join(rows))
@@ -411,6 +727,7 @@ class App:
         self.root.after(1500, self.tick_top)
 
     def quit(self):
+        self.save_now()
         if self.overlay:
             self.overlay.destroy()
         self.root.destroy()
@@ -428,41 +745,75 @@ def enable_dpi_awareness():
 
 
 def selftest():
-    """CI 확인용: 빨간 조준선을 띄우고 화면 중앙에 실제로 그려졌는지 검사."""
+    """CI 확인용: 만들기/그리기 조준선을 띄우고 화면 중앙에 실제로 그려졌는지 검사."""
     import tkinter as tk
 
     global SETTINGS_PATH
     SETTINGS_PATH = os.devnull
+
+    for code in [EXAMPLE_CODE, "0", "0;P;c;8;u;FF8800FF;h;1;t;2;o;1;d;1;z;3;0b;0;1b;0",
+                 "0;s;1;P;0g;1;0v;9;1b;0;a;0.35;o;0.123"]:
+        cfg = parse_code(code)
+        assert parse_code(make_code(cfg)) == cfg, (code, make_code(cfg))
+    print("code round trip: OK")
+
     root = tk.Tk()
     app = App(root)
-    app.code_var.set("0;P;c;7;h;0;0t;4;0l;10;0o;2;0a;1;1b;0")
-    app.apply()
-    for _ in range(20):
-        root.update()
-        time.sleep(0.05)
-    assert app.cfg["rgb"] == (255, 0, 0), app.cfg
-    print("overlay window created and drawn: OK")
 
-    if IS_WINDOWS:
+    def pump():
+        for _ in range(10):
+            root.update()
+            time.sleep(0.03)
+
+    def red_at_center():
+        if not IS_WINDOWS:
+            return None
         try:
             from PIL import ImageGrab
         except ImportError:
-            print("Pillow not installed, skipping screen check")
-        else:
-            sw = app.overlay.user32.GetSystemMetrics(0)
-            sh = app.overlay.user32.GetSystemMetrics(1)
-            shot = ImageGrab.grab(bbox=(sw // 2 - 20, sh // 2 - 20, sw // 2 + 20, sh // 2 + 20))
-            red = sum(1 for p in shot.getdata() if p[0] > 200 and p[1] < 60 and p[2] < 60)
-            print("red pixels at screen center:", red)
-            assert red >= 4 * 10 * 4 * 0.9, "crosshair not visible on screen"
-            app.show_var.set(False)
-            app.update_visible()
-            root.update()
-            time.sleep(0.3)
-            shot = ImageGrab.grab(bbox=(sw // 2 - 20, sh // 2 - 20, sw // 2 + 20, sh // 2 + 20))
-            red = sum(1 for p in shot.getdata() if p[0] > 200 and p[1] < 60 and p[2] < 60)
-            print("red pixels after hiding:", red)
-            assert red == 0, "crosshair still visible after hiding"
+            return None
+        sw = app.overlay.user32.GetSystemMetrics(0)
+        sh = app.overlay.user32.GetSystemMetrics(1)
+        shot = ImageGrab.grab(bbox=(sw // 2 - 20, sh // 2 - 20, sw // 2 + 20, sh // 2 + 20))
+        px = shot.convert("RGB").tobytes()
+        return sum(1 for i in range(0, len(px), 3)
+                   if px[i] > 200 and px[i + 1] < 60 and px[i + 2] < 60)
+
+    def check(name, expected):
+        pump()
+        red = red_at_center()
+        print("%s: red pixels at screen center = %s (expected %d)" % (name, red, expected))
+        assert red is None or red == expected, name
+
+    # 1) 만들기: 코드로 빨간 + 모양 (팔 4개 x 10x4 = 160칸)
+    app.tabs.select(0)
+    app.on_tab()
+    app.code_var.set("0;P;c;7;h;0;0t;4;0l;10;0o;2;0a;1;1b;0")
+    app.apply_code()
+    assert app.cfg["rgb"] == (255, 0, 0) and app.vars["0l"].get() == 10
+    check("make tab", 160)
+
+    # 2) 그리기: + 모양 대칭으로 한쪽 팔(8칸)만 그리면 팔 4개 = 32칸
+    app.tabs.select(1)
+    app.on_tab()
+
+    class Click:
+        def __init__(self, x, y):
+            self.x, self.y = x * app.CELL + 2, y * app.CELL + 2
+
+    mid = GRID // 2
+    app.set_brush("FF0000")
+    for x in range(mid + 2, mid + 10):
+        app.paint(Click(x, mid), erase=False)
+    assert len(app.pixels) == 32, len(app.pixels)
+    check("draw tab", 32)
+    app.paint(Click(mid + 9, mid), erase=True)  # 끝 칸 지우기 -> 대칭으로 4칸 지워짐
+    assert len(app.pixels) == 28, len(app.pixels)
+    check("draw tab after erase", 28)
+
+    app.show_var.set(False)
+    app.update_visible()
+    check("hidden", 0)
     app.quit()
     print("SELFTEST PASSED")
 
