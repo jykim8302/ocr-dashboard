@@ -180,7 +180,7 @@ def make_code(cfg):
     return ";".join(parts)
 
 
-GRID = 41  # 그리기 칸 수 (가운데 칸 = 화면 정중앙)
+GRID = 40  # 그리기 칸 수 (가운데 4칸이 만나는 점 = 화면 정중앙, 발로란트 조준선과 같은 기준)
 
 
 def render_pixels(pixels, scale=1.0):
@@ -196,6 +196,107 @@ def render_pixels(pixels, scale=1.0):
             start = (y * side + x0) * 4
             buf[start:start + len(row)] = row
     return side, buf
+
+
+def _shape(cfg):
+    """설정이 그리기 칸에서 차지하는 자리. 반환: (색 칸 set, 테두리 칸 set)"""
+    rects, ot = build_rects(cfg, 1.0)
+    c = GRID // 2
+    fill, line = set(), set()
+    for x0, y0, x1, y1, _ in rects:
+        fill.update((x + c, y + c) for y in range(y0, y1) for x in range(x0, x1))
+    for x0, y0, x1, y1, _ in rects if ot else ():
+        line.update((x + c, y + c) for y in range(y0 - ot, y1 + ot)
+                    for x in range(x0 - ot, x1 + ot))
+    return fill, line - fill
+
+
+# 그림 -> 코드 찾을 때 바꿔 보는 값: (키, 후보 값, 같이 켜는 키)
+_SEARCH = [("d", [0], None), ("z", range(1, 7), "d"), ("h", [0], None), ("t", range(1, 7), "h")]
+for _p in ("0", "1"):
+    _SEARCH += [(_p + "b", [0], None), (_p + "l", range(1, 21), _p + "b"),
+                (_p + "t", range(1, 11), _p + "b"), (_p + "o", range(0, 21), _p + "b"),
+                (_p + "v", range(1, 21), _p + "g"), (_p + "g", [0], None)]
+
+
+def pixels_to_cfg(pixels):
+    """그린 그림과 가장 비슷한 발로란트 조준선 설정 찾기. 반환: (설정, 일치율 0~1)"""
+    colors = {}
+    for rgba in pixels.values():
+        colors[rgba[:3]] = colors.get(rgba[:3], 0) + 1
+    shown = {rgb: n for rgb, n in colors.items() if rgb != (0, 0, 0)} or colors
+    main = max(shown, key=shown.get)
+    # 검은 칸은 테두리로 보기 (전부 검은색이면 검은 조준선)
+    want_line = {p for p, c in pixels.items() if c[:3] == (0, 0, 0) and main != (0, 0, 0)}
+    want_fill = set(pixels) - want_line
+
+    def error(cfg):
+        fill, line = _shape(cfg)
+        return len(fill ^ want_fill) + len(line ^ want_line)
+
+    def first_guess(dot):
+        # 정중앙 가로줄을 오른쪽으로 훑어서 색 칸 덩어리 = 안쪽 선, 바깥 선
+        c = GRID // 2
+        cfg = dict(parse_code("0"), o=1.0, d=0.0, h=float(bool(want_line)), **{"0b": 0.0, "1b": 0.0})
+        if dot and ((c, c) in want_fill or (c - 1, c - 1) in want_fill):
+            cfg["d"] = 1.0
+        runs, start = [], None
+        for x in range(GRID // 2):
+            hit = (c + x, c) in want_fill or (c + x, c - 1) in want_fill
+            if hit and start is None:
+                start = x
+            if not hit and start is not None:
+                runs.append((start, x))
+                start = None
+        if start is not None:
+            runs.append((start, GRID // 2))
+        if cfg["d"] and runs and runs[0][0] == 0:
+            runs.pop(0)
+        for p, (x0, x1) in zip(("0", "1"), runs):
+            cfg.update({p + "b": 1.0, p + "o": float(x0), p + "l": float(x1 - x0)})
+        return cfg
+
+    best, best_err = None, None
+    for cfg in (first_guess(True), first_guess(False), dict(parse_code("0"), o=1.0)):
+        err = error(cfg)
+        improved = True
+        while improved:  # 값을 하나씩 바꿔 보면서 더 비슷해지면 채택
+            improved = False
+            for key, values, enable in _SEARCH:
+                for v in values:
+                    trial = dict(cfg)
+                    trial[key] = float(v)
+                    if enable:
+                        trial[enable] = 1.0
+                    e = error(trial)
+                    if e < err:
+                        cfg, err, improved = trial, e, True
+        if best_err is None or err < best_err:
+            best, best_err = cfg, err
+
+    cfg = best
+    cfg["rgb"] = main
+
+    # 불투명도: 각 부분이 그려진 칸의 평균 투명도
+    def mean_alpha(cells, default):
+        alphas = [pixels[p][3] for p in cells if p in pixels]
+        return round(sum(alphas) / len(alphas) / 255, 2) if alphas else default
+
+    only = {"0": {"1b": 0.0, "d": 0.0}, "1": {"0b": 0.0, "d": 0.0}, "": {"0b": 0.0, "1b": 0.0}}
+    for p, alpha_key in (("0", "0a"), ("1", "1a"), ("", "a")):
+        cfg[alpha_key] = mean_alpha(_shape(dict(cfg, h=0.0, **only[p]))[0], 1.0)
+    cfg["o"] = mean_alpha(want_line, 0.5) if cfg["h"] else 0.5
+
+    # 꺼진 부분의 값은 기본값으로 (코드를 짧고 깔끔하게)
+    unused = [] if cfg["d"] else ["z", "a"]
+    unused += [] if cfg["h"] else ["t", "o"]
+    for p in ("0", "1"):
+        unused += [p + k for k in ("l", "t", "o", "a", "v", "g")] if not cfg[p + "b"] else (
+            [] if cfg[p + "g"] else [p + "v"])
+    cfg.update({k: float(DEFAULTS[k]) for k in unused})
+
+    wrong = best_err + sum(n for rgb, n in colors.items() if rgb not in (main, (0, 0, 0)))
+    return cfg, max(0.0, 1 - wrong / max(1, len(pixels)))
 
 
 # ---------------------------------------------------------------- Windows 오버레이 창
@@ -371,6 +472,8 @@ class App:
         for key, value in settings.get("pixels", {}).items():
             try:
                 x, y = map(int, key.split(","))
+                if not (0 <= x < GRID and 0 <= y < GRID):
+                    continue
                 self.pixels[(x, y)] = tuple(int(value[i:i + 2], 16) for i in (0, 2, 4, 6))
             except ValueError:
                 continue
@@ -575,12 +678,12 @@ class App:
                                highlightbackground="#555", cursor="crosshair",
                                bg="#%02x%02x%02x" % self.DRAW_BG)
         self.board.pack(pady=6)
-        mid = GRID // 2
+        center = (GRID // 2 - 1, GRID // 2)
         self.cells = {}
         for y in range(GRID):
             for x in range(GRID):
-                line = "#596068" if (x, y) == (mid, mid) else (
-                    "#41474d" if mid in (x, y) else "#363b40")
+                line = "#596068" if x in center and y in center else (
+                    "#41474d" if x in center or y in center else "#363b40")
                 self.cells[(x, y)] = self.board.create_rectangle(
                     x * self.CELL, y * self.CELL, (x + 1) * self.CELL, (y + 1) * self.CELL,
                     outline=line)
@@ -589,7 +692,7 @@ class App:
                            ("<Button-3>", True), ("<B3-Motion>", True)):
             self.board.bind(seq, lambda e, er=erase: self.paint(e, er))
 
-        tk.Label(f, text="왼쪽 클릭: 그리기   오른쪽 클릭: 지우기   (가운데 칸 = 화면 정중앙)",
+        tk.Label(f, text="왼쪽 클릭: 그리기   오른쪽 클릭: 지우기   (가운데 4칸 사이 = 화면 정중앙)",
                  font=(self.font[0], 9), fg="#777").pack()
         btns = tk.Frame(f)
         btns.pack(fill="x", pady=(4, 0))
@@ -597,6 +700,8 @@ class App:
                   command=self.clear_drawing).pack(side="left", expand=True, fill="x")
         tk.Button(btns, text="⬇ '만들기' 조준선 가져오기", font=self.font,
                   command=self.import_made).pack(side="left", expand=True, fill="x", padx=(4, 0))
+        tk.Button(f, text="🔁 이 그림을 발로란트 코드로 바꾸기", font=self.bold,
+                  command=self.drawing_to_code).pack(fill="x", pady=(4, 0))
 
     def set_brush(self, hex_color):
         self.brush_rgb = tuple(int(hex_color[k:k + 2], 16) for k in (0, 2, 4))
@@ -663,6 +768,31 @@ class App:
         self.refresh_board()
         self.redraw()
         self.set_status("✔ 가져왔어요. 이제 마음대로 고쳐 그려 보세요.")
+
+    def drawing_to_code(self):
+        """그린 그림과 가장 비슷한 발로란트 조준선을 찾아서 코드로"""
+        if not self.pixels:
+            self.set_status("먼저 그림을 그려 주세요.", ok=False)
+            return
+        self.set_status("바꾸는 중...")
+        self.root.update_idletasks()
+        self.cfg, match = pixels_to_cfg(self.pixels)
+        code = make_code(self.cfg)
+        self.code_var.set(code)
+        self.load_vars()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(code)
+        self.tabs.select(0)
+        self.on_tab()
+        paste = "코드도 복사해 뒀으니 발로란트 설정 > 조준선 > 가져오기(Import)에 붙여넣으세요."
+        if match >= 0.99:
+            self.set_status("✔ 똑같이 바꿨어요! " + paste)
+        elif match >= 0.8:
+            self.set_status("✔ 비슷하게 바꿨어요 (일치 %d%%). " % (match * 100) + paste)
+        else:
+            self.set_status("⚠ 이 그림은 발로란트 조준선으로 표현하기 어려워서 많이 달라요 "
+                            "(일치 %d%%). 그림은 '그리기' 탭에 그대로 있어요." % (match * 100), ok=False)
+        return match
 
     # ------------------------------------------------ 화면 표시
 
@@ -793,7 +923,7 @@ def selftest():
     assert app.cfg["rgb"] == (255, 0, 0) and app.vars["0l"].get() == 10
     check("make tab", 160)
 
-    # 2) 그리기: + 모양 대칭으로 한쪽 팔(8칸)만 그리면 팔 4개 = 32칸
+    # 2) 그리기: + 모양 대칭으로 한쪽 팔(8칸)만 그리면 두께 2칸짜리 팔 4개 = 64칸
     app.tabs.select(1)
     app.on_tab()
 
@@ -805,11 +935,18 @@ def selftest():
     app.set_brush("FF0000")
     for x in range(mid + 2, mid + 10):
         app.paint(Click(x, mid), erase=False)
-    assert len(app.pixels) == 32, len(app.pixels)
-    check("draw tab", 32)
-    app.paint(Click(mid + 9, mid), erase=True)  # 끝 칸 지우기 -> 대칭으로 4칸 지워짐
-    assert len(app.pixels) == 28, len(app.pixels)
-    check("draw tab after erase", 28)
+    assert len(app.pixels) == 64, len(app.pixels)
+    check("draw tab", 64)
+    app.paint(Click(mid + 9, mid), erase=True)  # 끝 칸 지우기 -> 대칭으로 8칸 지워짐
+    assert len(app.pixels) == 56, len(app.pixels)
+    check("draw tab after erase", 56)
+
+    # 3) 그림 -> 코드: 그린 + 모양이 똑같은 코드로 바뀌어야 함
+    match = app.drawing_to_code()
+    print("drawing -> code:", app.code_var.get(), "match", match)
+    assert match == 1.0 and app.mode == "make", match
+    assert root.clipboard_get() == make_code(app.cfg) == make_code(parse_code(root.clipboard_get()))
+    check("converted code", 56)
 
     app.show_var.set(False)
     app.update_visible()
