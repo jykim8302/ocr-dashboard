@@ -688,7 +688,7 @@ class App:
 
         size = GRID * self.CELL
         self.board = tk.Canvas(f, width=size, height=size, highlightthickness=1,
-                               highlightbackground="#555", cursor="crosshair",
+                               highlightbackground="#555", cursor="arrow",  # 윈도우 기본 포인터
                                bg="#%02x%02x%02x" % self.DRAW_BG)
         self.board.pack(pady=6)
         center = (GRID // 2 - 1, GRID // 2)
