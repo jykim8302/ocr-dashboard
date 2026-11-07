@@ -837,8 +837,10 @@ class App:
                   command=self.undo).pack(side="left", expand=True, fill="x")
         tk.Button(btns, text="🗑 전체 지우기", font=self.font,
                   command=self.clear_drawing).pack(side="left", expand=True, fill="x", padx=4)
-        tk.Button(btns, text="⬇ '만들기' 가져오기", font=self.font,
-                  command=self.import_made).pack(side="left", expand=True, fill="x")
+        tk.Button(btns, text="⊕ 가운데로", font=self.font,
+                  command=self.center_drawing).pack(side="left", expand=True, fill="x")
+        tk.Button(f, text="⬇ '만들기' 조준선 가져오기", font=self.font,
+                  command=self.import_made).pack(fill="x", pady=(4, 0))
         tk.Button(f, text="🔁 이 그림을 발로란트 코드로 바꾸기", font=self.bold,
                   command=self.drawing_to_code).pack(fill="x", pady=(4, 0))
         self.on_tool()
@@ -1065,6 +1067,30 @@ class App:
             self.raster[:] = bytes(len(self.raster))
             self.refresh_board()
             self.redraw()
+
+    def center_drawing(self):
+        """그린 그림 전체를 옮겨서 가운데(= 화면 정중앙)에 맞추기"""
+        box = _content_box(self.raster)
+        if not box:
+            self.set_status("먼저 그림을 그려 주세요.", ok=False)
+            return
+        x0, y0, x1, y1 = box
+        # 칸 단위로 옮겨서 픽셀 그림이 흐려지지 않게
+        dx = min(max(round((HI - x0 - x1) / 2 / SS) * SS, -x0), HI - x1)
+        dy = min(max(round((HI - y0 - y1) / 2 / SS) * SS, -y0), HI - y1)
+        if dx == dy == 0:
+            self.set_status("✔ 이미 가운데에 있어요.")
+            return
+        self.push_undo()
+        old = bytes(self.raster)
+        self.raster[:] = bytes(len(self.raster))
+        for y in range(y0, y1):
+            row = old[(y * HI + x0) * 4:(y * HI + x1) * 4]
+            i = ((y + dy) * HI + x0 + dx) * 4
+            self.raster[i:i + len(row)] = row
+        self.refresh_board()
+        self.redraw()
+        self.set_status("✔ 가운데로 옮겼어요.")
 
     def import_made(self):
         """'만들기' 탭의 조준선을 그리기 칸으로 옮겨서 고쳐 그릴 수 있게"""
@@ -1322,6 +1348,26 @@ def selftest():
     app.tool_var.set("pixel")
     app.on_tool()
     check("after undo", 56)
+
+    # 가운데로: 구석에 그린 사각형이 정중앙으로 옮겨지고, 되돌리면 원래대로
+    app.tool_var.set("rect")
+    app.fill_var.set(True)
+    app.sym_var.set("1")
+    drag([(26, 4), (30, 7)])
+    before = drawn()
+    app.center_drawing()  # 칸 56개짜리 + 모양 + 사각형 전체가 가운데로
+    x0, y0, x1, y1 = _content_box(app.raster)
+    print("centered box:", (x0, y0, x1, y1), "center", HI / 2)
+    assert abs((x0 + x1) / 2 - HI / 2) <= SS / 2 and abs((y0 + y1) / 2 - HI / 2) <= SS / 2
+    assert drawn() == before
+    app.undo()
+    app.undo()
+    assert drawn() == 56, drawn()
+    steps = len(app.undo_stack)
+    app.center_drawing()  # 이미 가운데인 + 모양은 그대로 (되돌리기 목록도 그대로)
+    assert drawn() == 56 and len(app.undo_stack) == steps
+    app.tool_var.set("pixel")
+    app.on_tool()
 
     # 3) 그림 -> 코드: 그린 + 모양이 똑같은 코드로 바뀌어야 함
     match = app.drawing_to_code()
