@@ -50,6 +50,9 @@ LIMITS = {
 
 EXAMPLE_CODE = "0;P;c;5;h;0;f;0;0l;4;0o;2;0a;1;0f;0;1b;0"
 
+APP_TITLE = "발로란트 조준선 오버레이"
+OVERLAY_CLASS = "ValorantCrosshairOverlay"
+
 SETTINGS_PATH = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")), "ValorantCrosshairOverlay.json"
 )
@@ -448,17 +451,59 @@ class Overlay:
         g.SelectObject.restype = w.HGDIOBJ
         g.DeleteObject.argtypes = [w.HGDIOBJ]
         g.DeleteDC.argtypes = [w.HDC]
+        u.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+        u.DefWindowProcW.restype = ctypes.c_ssize_t
+        u.RegisterHotKey.argtypes = [w.HWND, ctypes.c_int, w.UINT, w.UINT]
+        u.UnregisterHotKey.argtypes = [w.HWND, ctypes.c_int]
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetModuleHandleW.argtypes = [w.LPCWSTR]
+        kernel32.GetModuleHandleW.restype = w.HMODULE
+        hinst = kernel32.GetModuleHandleW(None)
+
+        if not Overlay._wndproc:  # 창 종류 등록 (프로그램마다 한 번)
+            WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+
+            class WNDCLASSW(ctypes.Structure):
+                _fields_ = [("style", w.UINT), ("lpfnWndProc", WNDPROC),
+                            ("cbClsExtra", ctypes.c_int), ("cbWndExtra", ctypes.c_int),
+                            ("hInstance", w.HINSTANCE), ("hIcon", w.HICON), ("hCursor", w.HANDLE),
+                            ("hbrBackground", w.HBRUSH), ("lpszMenuName", w.LPCWSTR),
+                            ("lpszClassName", w.LPCWSTR)]
+
+            def wndproc(hwnd, msg, wparam, lparam):
+                if msg == 0x0312:  # WM_HOTKEY: F8 눌림 (게임 화면에서도 옴)
+                    Overlay.hotkey_hits += 1
+                    return 0
+                return u.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+            Overlay._wndproc = WNDPROC(wndproc)
+            wc = WNDCLASSW(lpfnWndProc=Overlay._wndproc, hInstance=hinst,
+                           lpszClassName=OVERLAY_CLASS)
+            u.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+            if not u.RegisterClassW(ctypes.byref(wc)):
+                raise ctypes.WinError(ctypes.get_last_error())
 
         ex_style = (0x00080000    # WS_EX_LAYERED     : 투명도
                     | 0x00000020  # WS_EX_TRANSPARENT : 클릭 통과
                     | 0x00000008  # WS_EX_TOPMOST     : 항상 위
                     | 0x00000080  # WS_EX_TOOLWINDOW  : 작업표시줄/Alt+Tab 에 안 보이게
                     | 0x08000000) # WS_EX_NOACTIVATE  : 포커스 안 뺏기
-        self.hwnd = u.CreateWindowExW(ex_style, "STATIC", "Crosshair Overlay", 0x80000000,
-                                      0, 0, 1, 1, None, None, None, None)
+        self.hwnd = u.CreateWindowExW(ex_style, OVERLAY_CLASS, "Crosshair Overlay", 0x80000000,
+                                      0, 0, 1, 1, None, None, hinst, None)
         if not self.hwnd:
             raise ctypes.WinError(ctypes.get_last_error())
         self.visible = True
+        # F8 을 윈도우 단축키로 등록 (게임이 관리자 권한이어도 동작). 다른 프로그램이 이미
+        # F8 을 쓰고 있으면 실패 -> 키 상태를 직접 읽는 방식으로 대신함
+        self.hotkey = bool(u.RegisterHotKey(self.hwnd, 1, 0x4000, 0x77))  # MOD_NOREPEAT, F8
+
+    _wndproc = None
+    hotkey_hits = 0
+
+    def take_hotkey(self):
+        """지난번 확인 뒤로 F8 이 눌렸는지"""
+        hit, Overlay.hotkey_hits = Overlay.hotkey_hits > 0, 0
+        return hit
 
     def draw(self, side, rgba):
         u, g, w = self.user32, self.gdi32, self.w
@@ -513,7 +558,30 @@ class Overlay:
         self.keep_on_top()
 
     def destroy(self):
+        if self.hotkey:
+            self.user32.UnregisterHotKey(self.hwnd, 1)
         self.user32.DestroyWindow(self.hwnd)
+
+
+def close_other_instances():
+    """이미 켜져 있는 이 프로그램(과 그 조준선)을 닫기. 두 번 실행하면 조준선이 두 개 떠서
+    하나를 꺼도 다른 하나가 남는 문제를 막음"""
+    from ctypes import wintypes as w
+
+    u = ctypes.WinDLL("user32")
+    u.FindWindowW.argtypes = [w.LPCWSTR, w.LPCWSTR]
+    u.FindWindowW.restype = w.HWND
+    u.PostMessageW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+    for _ in range(50):  # 최대 5초 기다림
+        found = [h for h in (u.FindWindowW(None, APP_TITLE),
+                             u.FindWindowW(OVERLAY_CLASS, None),
+                             u.FindWindowW("Static", "Crosshair Overlay"))  # 예전 버전 조준선
+                 if h]
+        if not found:
+            return
+        for h in found:
+            u.PostMessageW(h, 0x0010, 0, 0)  # WM_CLOSE
+        time.sleep(0.1)
 
 
 # ---------------------------------------------------------------- 설정 창
@@ -587,7 +655,7 @@ class App:
 
         self.font = ("Malgun Gothic", 10)
         self.bold = ("Malgun Gothic", 11, "bold")
-        root.title("발로란트 조준선 오버레이")
+        root.title(APP_TITLE)
         root.resizable(False, False)
         root.configure(padx=12, pady=10)
 
@@ -1193,11 +1261,15 @@ class App:
             self.overlay.set_visible(self.show_var.get())
 
     def tick_hotkey(self):
-        down = bool(self.overlay.user32.GetAsyncKeyState(0x77) & 0x8000)  # F8
-        if down and not self.f8_down:
+        if self.overlay.hotkey:
+            pressed = self.overlay.take_hotkey()
+        else:
+            down = bool(self.overlay.user32.GetAsyncKeyState(0x77) & 0x8000)  # F8
+            pressed = down and not self.f8_down
+            self.f8_down = down
+        if pressed:
             self.show_var.set(not self.show_var.get())
             self.update_visible()
-        self.f8_down = down
         self.root.after(50, self.tick_hotkey)
 
     def tick_top(self):
@@ -1246,6 +1318,24 @@ def selftest():
         side, _ = render(parse_code(code), 3.0)
         assert side <= 400, (code, side)
     print("bad numbers: OK")
+
+    if IS_WINDOWS:  # 이미 켜진 프로그램이 있으면 새로 켤 때 닫혀야 함
+        import subprocess
+
+        first = subprocess.Popen([sys.executable, os.path.abspath(__file__), "--selftest-child"])
+        u = ctypes.WinDLL("user32")
+        u.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
+        u.FindWindowW.restype = ctypes.c_void_p
+        for _ in range(150):
+            if u.FindWindowW(None, APP_TITLE) and u.FindWindowW(OVERLAY_CLASS, None):
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("first copy did not start")
+        close_other_instances()
+        assert first.wait(timeout=10) == 0
+        assert not u.FindWindowW(OVERLAY_CLASS, None)
+        print("starting again closes the first copy: OK")
 
     root = tk.Tk()
     app = App(root)
@@ -1376,6 +1466,15 @@ def selftest():
     assert root.clipboard_get() == make_code(app.cfg) == make_code(parse_code(root.clipboard_get()))
     check("converted code", 56)
 
+    if IS_WINDOWS:  # F8 단축키로 끄고 켜기
+        assert app.overlay.hotkey, "F8 hotkey not registered"
+        u.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        u.PostMessageW(app.overlay.hwnd, 0x0312, 1, 0)  # WM_HOTKEY
+        check("F8 off", 0)
+        assert not app.show_var.get()
+        u.PostMessageW(app.overlay.hwnd, 0x0312, 1, 0)
+        check("F8 on", 56)
+        assert app.show_var.get()
     app.show_var.set(False)
     app.update_visible()
     check("hidden", 0)
@@ -1389,6 +1488,11 @@ def main():
     if "--selftest" in sys.argv:
         selftest()
         return
+    if "--selftest-child" in sys.argv:  # 셀프테스트용 '먼저 켜져 있던 프로그램'
+        global SETTINGS_PATH
+        SETTINGS_PATH = os.devnull
+    elif IS_WINDOWS:
+        close_other_instances()
     import tkinter as tk
 
     root = tk.Tk()
