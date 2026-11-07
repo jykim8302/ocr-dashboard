@@ -13,12 +13,14 @@
 실행: python crosshair_overlay.py   (Windows 전용, 파이썬 기본 설치만으로 동작)
 """
 
+import base64
 import ctypes
 import json
 import math
 import os
 import sys
 import time
+import zlib
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -196,19 +198,102 @@ def make_code(cfg):
 GRID = 40  # 그리기 칸 수 (가운데 4칸이 만나는 점 = 화면 정중앙, 발로란트 조준선과 같은 기준)
 
 
-def render_pixels(pixels, scale=1.0):
-    """그린 그림 {(x, y): (r, g, b, a)} -> 정사각형 RGBA 이미지. 반환: (한 변 크기, bytearray)"""
+SS = 4          # 그린 그림은 그리기 칸 한 칸을 SS x SS 로 잘게 나눠 저장 (부드러운 선/도형용)
+HI = GRID * SS  # 저장하는 그림 한 변 크기
+
+
+def raster_set_cell(raster, x, y, rgba):
+    """그리기 칸 (x, y) 하나를 rgba 로 채우기"""
+    row = bytes(rgba) * SS
+    for yy in range(y * SS, (y + 1) * SS):
+        i = (yy * HI + x * SS) * 4
+        raster[i:i + len(row)] = row
+
+
+def _content_box(raster):
+    """그림이 있는 범위 (x0, y0, x1, y1), 비어 있으면 None"""
+    x0, x1, rows = HI, 0, []
+    for y in range(HI):
+        alpha = raster[y * HI * 4 + 3:(y + 1) * HI * 4:4]
+        if alpha.strip(b"\0"):
+            rows.append(y)
+            x0 = min(x0, len(alpha) - len(alpha.lstrip(b"\0")))
+            x1 = max(x1, len(alpha.rstrip(b"\0")))
+    return (x0, rows[0], x1, rows[-1] + 1) if rows else None
+
+
+def render_raster(raster, scale=1.0):
+    """그린 그림 -> 화면 크기에 맞춘 정사각형 RGBA 이미지 (부드럽게 축소/확대)"""
     side = max(1, round(GRID * scale))
-    buf = bytearray(side * side * 4)
-    for (cx, cy), rgba in pixels.items():
-        x0, x1 = round(cx * scale), max(round((cx + 1) * scale), round(cx * scale) + 1)
-        y0, y1 = round(cy * scale), max(round((cy + 1) * scale), round(cy * scale) + 1)
-        x1, y1 = min(x1, side), min(y1, side)
-        row = bytes(rgba) * (x1 - x0)
-        for y in range(y0, y1):
-            start = (y * side + x0) * 4
-            buf[start:start + len(row)] = row
-    return side, buf
+    out = bytearray(side * side * 4)
+    box = _content_box(raster)
+    if not box:
+        return side, out
+    f = HI / side  # 출력 한 칸 = 그림 f 칸
+
+    def weights(o):
+        a, b = o * f, (o + 1) * f
+        return [(s, min(b, s + 1) - max(a, s)) for s in range(int(a), min(HI, math.ceil(b)))
+                if min(b, s + 1) > max(a, s)]
+
+    ox0, ox1 = int(box[0] / f), min(side, math.ceil(box[2] / f))
+    oy0, oy1 = int(box[1] / f), min(side, math.ceil(box[3] / f))
+    wx = {o: weights(o) for o in range(ox0, ox1)}
+    for oy in range(oy0, oy1):
+        wy = weights(oy)
+        for ox in range(ox0, ox1):
+            sa = sr = sg = sb = tw = 0.0
+            for sy, w1 in wy:
+                row = sy * HI
+                for sx, w2 in wx[ox]:
+                    w = w1 * w2
+                    tw += w
+                    i = (row + sx) * 4
+                    a = raster[i + 3]
+                    if a:
+                        wa = w * a
+                        sa += wa
+                        sr += raster[i] * wa
+                        sg += raster[i + 1] * wa
+                        sb += raster[i + 2] * wa
+            if sa:
+                i = (oy * side + ox) * 4
+                out[i:i + 4] = bytes((round(sr / sa), round(sg / sa), round(sb / sa),
+                                      min(255, round(sa / tw))))
+    return side, out
+
+
+def raster_to_pixels(raster):
+    """그린 그림 -> 그리기 칸 {(x, y): (r, g, b, a)} (반 이상 칠해진 칸만)"""
+    side, rgba = render_raster(raster, 1.0)
+    return {(i // 4 % side, i // 4 // side): tuple(rgba[i:i + 4])
+            for i in range(0, len(rgba), 4) if rgba[i + 3] >= 128}
+
+
+def shape_distance(kind, ax, ay, bx, by):
+    """도형 경계까지의 거리 함수 (안쪽은 음수). 좌표는 그림(HI) 단위"""
+    if kind == "line":
+        dx, dy = bx - ax, by - ay
+        l2 = dx * dx + dy * dy
+
+        def dist(px, py):
+            t = ((px - ax) * dx + (py - ay) * dy) / l2 if l2 else 0.0
+            t = 0.0 if t < 0 else (1.0 if t > 1 else t)
+            return math.hypot(px - ax - t * dx, py - ay - t * dy)
+        return dist
+    cx, cy = (ax + bx) / 2, (ay + by) / 2
+    hx, hy = max(abs(bx - ax) / 2, 0.5), max(abs(by - ay) / 2, 0.5)
+    if kind == "rect":
+        def dist(px, py):
+            qx, qy = abs(px - cx) - hx, abs(py - cy) - hy
+            return math.hypot(max(qx, 0), max(qy, 0)) + min(max(qx, qy), 0)
+        return dist
+
+    def dist(px, py):  # 타원
+        nx, ny = (px - cx) / hx, (py - cy) / hy
+        grad = 2 * math.hypot(nx / hx, ny / hy)
+        return (nx * nx + ny * ny - 1) / grad if grad else -min(hx, hy)
+    return dist
 
 
 def _shape(cfg):
@@ -463,7 +548,7 @@ class App:
     PREVIEW = 220
     PREVIEW_BG = (70, 76, 82)
     DRAW_BG = (43, 47, 51)
-    CELL = 9  # 그리기 칸 한 칸 크기(px)
+    CELL = 8  # 그리기 칸 한 칸 크기(px)
 
     def __init__(self, root):
         import tkinter as tk
@@ -481,15 +566,23 @@ class App:
             self.cfg = parse_code(settings.get("code", EXAMPLE_CODE))
         except ValueError:
             self.cfg = parse_code(EXAMPLE_CODE)
-        self.pixels = {}
-        for key, value in settings.get("pixels", {}).items():
+        self.raster = bytearray(HI * HI * 4)  # 그린 그림 (RGBA, 한 칸 = SS x SS)
+        try:
+            data = zlib.decompress(base64.b64decode(settings.get("drawing", "")))
+            if len(data) == len(self.raster):
+                self.raster[:] = data
+        except (ValueError, zlib.error):
+            pass
+        for key, value in settings.get("pixels", {}).items():  # 예전 버전에서 그린 그림
             try:
                 x, y = map(int, key.split(","))
-                if not (0 <= x < GRID and 0 <= y < GRID):
-                    continue
-                self.pixels[(x, y)] = tuple(int(value[i:i + 2], 16) for i in (0, 2, 4, 6))
+                if 0 <= x < GRID and 0 <= y < GRID and "drawing" not in settings:
+                    raster_set_cell(self.raster, x, y, bytes.fromhex(value))
             except ValueError:
                 continue
+        self.undo_stack = []
+        self.stroke = None
+        self.redraw_job = None
         self.brush_rgb = (255, 0, 0)
 
         self.font = ("Malgun Gothic", 10)
@@ -661,6 +754,14 @@ class App:
 
     # ------------------------------------------------ 그리기 탭
 
+    TOOLS = (("pixel", "▦ 픽셀"), ("brush", "🖌 붓"), ("line", "╱ 직선"),
+             ("rect", "▭ 사각형"), ("ellipse", "◯ 원"))
+    HINTS = {
+        "pixel": "왼쪽 클릭: 칸 칠하기   오른쪽 클릭: 지우기",
+        "brush": "왼쪽 드래그: 그리기   오른쪽 드래그: 지우개",
+        "shape": "드래그해서 크기 정하기 (Shift: 반듯하게)   오른쪽 드래그: 그 모양으로 지우기",
+    }
+
     def build_draw_tab(self, f):
         tk = self.tk
         top = tk.Frame(f)
@@ -674,16 +775,36 @@ class App:
                                      bg="#%02x%02x%02x" % self.brush_rgb)
         self.brush_swatch.pack(side="left", padx=6)
 
+        tools = tk.Frame(f)
+        tools.pack(fill="x", pady=(4, 0))
+        tk.Label(tools, text="도구", font=self.font).pack(side="left")
+        self.tool_var = tk.StringVar(value="pixel")
+        for value, text in self.TOOLS:
+            tk.Radiobutton(tools, text=text, value=value, variable=self.tool_var, font=self.font,
+                           indicatoron=False, padx=4, command=self.on_tool
+                           ).pack(side="left", padx=1)
+
         opts = tk.Frame(f)
-        opts.pack(fill="x", pady=(4, 0))
-        tk.Label(opts, text="불투명도", font=self.font).pack(side="left")
+        opts.pack(fill="x")
+        tk.Label(opts, text="굵기", font=self.font).pack(side="left")
+        self.width_var = tk.DoubleVar(value=2.0)
+        self.width_scale = tk.Scale(opts, from_=0.5, to=8, resolution=0.5, orient="horizontal",
+                                    variable=self.width_var, length=90)
+        self.width_scale.pack(side="left", padx=(2, 6))
+        self.fill_var = tk.BooleanVar(value=False)
+        self.fill_check = tk.Checkbutton(opts, text="채우기", font=self.font, variable=self.fill_var)
+        self.fill_check.pack(side="left")
+        tk.Label(opts, text="불투명도", font=self.font).pack(side="left", padx=(6, 0))
         self.brush_alpha = tk.DoubleVar(value=1.0)
         tk.Scale(opts, from_=0.1, to=1.0, resolution=0.05, orient="horizontal",
-                 variable=self.brush_alpha, length=110).pack(side="left", padx=(4, 12))
-        tk.Label(opts, text="대칭", font=self.font).pack(side="left")
+                 variable=self.brush_alpha, length=90).pack(side="left", padx=2)
+
+        sym = tk.Frame(f)
+        sym.pack(fill="x")
+        tk.Label(sym, text="대칭", font=self.font).pack(side="left")
         self.sym_var = tk.StringVar(value="8")
         for value, text in (("1", "없음"), ("4", "4방향"), ("8", "+ 모양")):
-            tk.Radiobutton(opts, text=text, value=value, variable=self.sym_var,
+            tk.Radiobutton(sym, text=text, value=value, variable=self.sym_var,
                            font=self.font).pack(side="left")
 
         size = GRID * self.CELL
@@ -691,30 +812,44 @@ class App:
                                highlightbackground="#555", cursor="arrow",  # 윈도우 기본 포인터
                                bg="#%02x%02x%02x" % self.DRAW_BG)
         self.board.pack(pady=6)
-        center = (GRID // 2 - 1, GRID // 2)
-        self.cells = {}
-        for y in range(GRID):
-            for x in range(GRID):
-                line = "#596068" if x in center and y in center else (
-                    "#41474d" if x in center or y in center else "#363b40")
-                self.cells[(x, y)] = self.board.create_rectangle(
-                    x * self.CELL, y * self.CELL, (x + 1) * self.CELL, (y + 1) * self.CELL,
-                    outline=line)
+        self.board_img = tk.PhotoImage(width=size, height=size)
+        self.board.create_image(0, 0, image=self.board_img, anchor="nw")
+        for i in range(GRID + 1):  # 칸 선 (가운데 십자선 = 화면 정중앙)
+            p = i * self.CELL
+            tag, color = ("center", "#6a7178") if i == GRID // 2 else ("grid", "#363b40")
+            self.board.create_line(p, 0, p, size, fill=color, tags=tag)
+            self.board.create_line(0, p, size, p, fill=color, tags=tag)
+        self.ring = self.board.create_oval(0, 0, 0, 0, outline="#bbbbbb", state="hidden")
         self.refresh_board()
-        for seq, erase in (("<Button-1>", False), ("<B1-Motion>", False),
-                           ("<Button-3>", True), ("<B3-Motion>", True)):
-            self.board.bind(seq, lambda e, er=erase: self.paint(e, er))
+        for button, erase in (("1", False), ("3", True)):
+            self.board.bind("<Button-%s>" % button, lambda e, er=erase: self.stroke_start(e, er))
+            self.board.bind("<B%s-Motion>" % button, self.stroke_move)
+            self.board.bind("<ButtonRelease-%s>" % button, self.stroke_end)
+        self.board.bind("<Motion>", self.move_ring)
+        self.board.bind("<Leave>", lambda e: self.board.itemconfigure(self.ring, state="hidden"))
+        self.root.bind("<Control-z>", lambda e: self.undo())
 
-        tk.Label(f, text="왼쪽 클릭: 그리기   오른쪽 클릭: 지우기   (가운데 4칸 사이 = 화면 정중앙)",
-                 font=(self.font[0], 9), fg="#777").pack()
+        self.hint = tk.Label(f, text="", font=(self.font[0], 9), fg="#777")
+        self.hint.pack()
         btns = tk.Frame(f)
         btns.pack(fill="x", pady=(4, 0))
+        tk.Button(btns, text="↶ 되돌리기", font=self.font,
+                  command=self.undo).pack(side="left", expand=True, fill="x")
         tk.Button(btns, text="🗑 전체 지우기", font=self.font,
-                  command=self.clear_drawing).pack(side="left", expand=True, fill="x")
-        tk.Button(btns, text="⬇ '만들기' 조준선 가져오기", font=self.font,
-                  command=self.import_made).pack(side="left", expand=True, fill="x", padx=(4, 0))
+                  command=self.clear_drawing).pack(side="left", expand=True, fill="x", padx=4)
+        tk.Button(btns, text="⬇ '만들기' 가져오기", font=self.font,
+                  command=self.import_made).pack(side="left", expand=True, fill="x")
         tk.Button(f, text="🔁 이 그림을 발로란트 코드로 바꾸기", font=self.bold,
                   command=self.drawing_to_code).pack(fill="x", pady=(4, 0))
+        self.on_tool()
+
+    def on_tool(self):
+        tool = self.tool_var.get()
+        self.board.itemconfigure("grid", state="normal" if tool == "pixel" else "hidden")
+        self.width_scale.configure(state="disabled" if tool == "pixel" else "normal")
+        self.fill_check.configure(state="normal" if tool in ("rect", "ellipse") else "disabled")
+        self.hint.configure(text=self.HINTS.get(tool, self.HINTS["shape"]))
+        self.board.itemconfigure(self.ring, state="hidden")
 
     def set_brush(self, hex_color):
         self.brush_rgb = tuple(int(hex_color[k:k + 2], 16) for k in (0, 2, 4))
@@ -724,41 +859,210 @@ class App:
         a = rgba[3] / 255
         return "#%02x%02x%02x" % tuple(round(rgba[k] * a + bg[k] * (1 - a)) for k in range(3))
 
-    def refresh_board(self, cells=None):
-        for p in cells or self.cells:
-            rgba = self.pixels.get(p)
-            fill = self.blend(rgba, self.DRAW_BG) if rgba else ""
-            self.board.itemconfigure(self.cells[p], fill=fill)
+    def refresh_board(self, box=None):
+        """그림(box 범위, 그림 단위)을 그리기 판에 다시 그리기"""
+        x0, y0, x1, y1 = box or (0, 0, HI, HI)
+        zoom = self.CELL // SS
+        empty = "#%02x%02x%02x" % self.DRAW_BG
+        rows = []
+        for y in range(y0, y1):
+            row = []
+            for x in range(x0, x1):
+                i = (y * HI + x) * 4
+                color = self.blend(self.raster[i:i + 4], self.DRAW_BG) if self.raster[i + 3] else empty
+                row += [color] * zoom
+            rows += ["{" + " ".join(row) + "}"] * zoom
+        if rows:
+            self.board_img.put(" ".join(rows), to=(x0 * zoom, y0 * zoom))
 
-    def paint(self, event, erase):
-        x, y = event.x // self.CELL, event.y // self.CELL
-        if not (0 <= x < GRID and 0 <= y < GRID):
-            return
-        m = GRID - 1
-        targets = {(x, y)}
+    def has_drawing(self):
+        return any(self.raster[3::4])
+
+    def mirrors(self, m):
+        """대칭 설정에 맞는 좌표 변환 목록 (m = 반대편 끝 좌표)"""
+        fs = [lambda x, y: (x, y)]
         if self.sym_var.get() in ("4", "8"):
-            targets |= {(m - x, y), (x, m - y), (m - x, m - y)}
+            fs += [lambda x, y: (m - x, y), lambda x, y: (x, m - y), lambda x, y: (m - x, m - y)]
         if self.sym_var.get() == "8":
-            targets |= {(b, a) for a, b in targets}
-        rgba = (*self.brush_rgb, round(self.brush_alpha.get() * 255))
-        changed = False
-        for p in targets:
-            if erase:
-                changed |= self.pixels.pop(p, None) is not None
-            elif self.pixels.get(p) != rgba:
-                self.pixels[p] = rgba
-                changed = True
-        if changed:
-            self.refresh_board(targets)
-            self.redraw()
+            fs += [lambda x, y, f=f: f(y, x) for f in list(fs)]
+        return fs
+
+    def move_ring(self, event):
+        """붓 크기만큼 동그라미를 마우스 따라 보여주기"""
+        if self.tool_var.get() != "brush":
+            return
+        r = self.width_var.get() * self.CELL / 2
+        self.board.coords(self.ring, event.x - r, event.y - r, event.x + r, event.y + r)
+        self.board.itemconfigure(self.ring, state="normal")
+
+    # 한 번 누르고 뗄 때까지 = 한 획. 시작할 때 그림을 저장해 두고 그 위에 그려서
+    # 같은 획 안에서 겹친 곳이 진해지지 않게 (그림판과 같은 방식)
+    def stroke_start(self, event, erase):
+        self.push_undo()
+        self.stroke = {"erase": erase, "base": bytes(self.raster), "cov": bytearray(HI * HI),
+                       "start": (event.x / self.CELL, event.y / self.CELL), "last": None,
+                       "box": None}
+        self.stroke_move(event)
+
+    def stroke_move(self, event):
+        s = getattr(self, "stroke", None)
+        if not s:
+            return
+        self.move_ring(event)
+        tool = self.tool_var.get()
+        p = (event.x / self.CELL, event.y / self.CELL)
+        if tool == "pixel":
+            box = self.paint_cells(p)
+        elif tool == "brush":
+            q = s["last"] or p
+            r = self.width_var.get() * SS / 2
+            box = None
+            for f in self.mirrors(GRID):
+                (ax, ay), (bx, by) = f(*q), f(*p)
+                box = self.union(box, self.stamp(
+                    shape_distance("line", ax * SS, ay * SS, bx * SS, by * SS), r,
+                    (min(ax, bx) * SS, min(ay, by) * SS, max(ax, bx) * SS, max(ay, by) * SS)))
+        else:
+            if event.state & 0x0001:  # Shift: 정사각형 / 정원 / 반듯한 선
+                p = self.snap(s["start"], p, tool)
+            box = self.draw_shape(tool, s["start"], p)
+        s["last"] = p
+        if box:
+            self.refresh_board(box)
+            self.request_redraw()
             self.set_status("")
+
+    def stroke_end(self, _event=None):
+        s = getattr(self, "stroke", None)
+        self.stroke = None
+        if s and self.raster == s["base"] and self.undo_stack:
+            self.undo_stack.pop()  # 아무것도 안 바뀐 획은 되돌리기 목록에서 빼기
+        self.redraw()
+
+    @staticmethod
+    def union(a, b):
+        if not a or not b:
+            return a or b
+        return min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])
+
+    @staticmethod
+    def snap(start, p, tool):
+        dx, dy = p[0] - start[0], p[1] - start[1]
+        if tool == "line":  # 가로/세로/대각선으로
+            ang = round(math.atan2(dy, dx) / (math.pi / 4)) * (math.pi / 4)
+            d = math.hypot(dx, dy)
+            return start[0] + d * math.cos(ang), start[1] + d * math.sin(ang)
+        d = max(abs(dx), abs(dy))
+        return start[0] + math.copysign(d, dx), start[1] + math.copysign(d, dy)
+
+    def paint_cells(self, p):
+        """픽셀 도구: 칸 단위로 칠하기 (빠르게 움직여도 빈틈 없게 사이 칸도 칠함)"""
+        s = self.stroke
+        cur = (math.floor(p[0]), math.floor(p[1]))
+        last = s["last"] and (math.floor(s["last"][0]), math.floor(s["last"][1])) or cur
+        steps = max(abs(cur[0] - last[0]), abs(cur[1] - last[1]), 1)
+        rgba = (0, 0, 0, 0) if s["erase"] else (*self.brush_rgb, round(self.brush_alpha.get() * 255))
+        box = None
+        for k in range(steps + 1):
+            x = round(last[0] + (cur[0] - last[0]) * k / steps)
+            y = round(last[1] + (cur[1] - last[1]) * k / steps)
+            for f in self.mirrors(GRID - 1):
+                cx, cy = f(x, y)
+                if 0 <= cx < GRID and 0 <= cy < GRID:
+                    raster_set_cell(self.raster, cx, cy, rgba)
+                    box = self.union(box, (cx * SS, cy * SS, (cx + 1) * SS, (cy + 1) * SS))
+        return box
+
+    def draw_shape(self, tool, a, b):
+        """도형 도구: 획 시작 그림으로 되돌린 뒤 지금 크기로 다시 그리기"""
+        s = self.stroke
+        old = s["box"]
+        if old:
+            x0, y0, x1, y1 = old
+            for y in range(y0, y1):
+                i, j = (y * HI + x0) * 4, (y * HI + x1) * 4
+                self.raster[i:j] = s["base"][i:j]
+                s["cov"][y * HI + x0:y * HI + x1] = bytes(x1 - x0)
+        half = self.width_var.get() * SS / 2
+        filled = self.fill_var.get() and tool != "line"
+        box = None
+        for f in self.mirrors(GRID):
+            (ax, ay), (bx, by) = f(*a), f(*b)
+            dist = shape_distance(tool, ax * SS, ay * SS, bx * SS, by * SS)
+            if filled:
+                cover = dist
+            elif tool == "line":
+                cover = lambda px, py, d=dist: d(px, py) - half
+            else:
+                cover = lambda px, py, d=dist: abs(d(px, py)) - half
+            box = self.union(box, self.stamp(cover, 0, (min(ax, bx) * SS, min(ay, by) * SS,
+                                                       max(ax, bx) * SS, max(ay, by) * SS),
+                                             pad=half))
+        s["box"] = box
+        return self.union(old, box)
+
+    def stamp(self, dist, r, bounds, pad=None):
+        """거리 함수 dist 로 정한 모양을 부드러운 가장자리로 칠하기 (r = 붓 반지름)"""
+        s = self.stroke
+        base, cov, raster = s["base"], s["cov"], self.raster
+        pad = r if pad is None else pad
+        x0, y0 = max(0, int(bounds[0] - pad - 1)), max(0, int(bounds[1] - pad - 1))
+        x1, y1 = min(HI, int(bounds[2] + pad + 2)), min(HI, int(bounds[3] + pad + 2))
+        if x0 >= x1 or y0 >= y1:
+            return None
+        cr, cg, cb = self.brush_rgb
+        ca = self.brush_alpha.get()
+        erase = s["erase"]
+        for y in range(y0, y1):
+            for x in range(x0, x1):
+                c = r + 0.5 - dist(x + 0.5, y + 0.5)
+                if c <= 0:
+                    continue
+                c = 255 if c >= 1 else int(c * 255)
+                k = y * HI + x
+                if c <= cov[k]:
+                    continue
+                cov[k] = c
+                i = k * 4
+                ba = base[i + 3]
+                if erase:
+                    raster[i:i + 4] = bytes((base[i], base[i + 1], base[i + 2], ba * (255 - c) // 255))
+                    continue
+                sa = ca * c / 255
+                fa = ba / 255 * (1 - sa)
+                oa = sa + fa
+                raster[i:i + 4] = bytes((round((cr * sa + base[i] * fa) / oa),
+                                         round((cg * sa + base[i + 1] * fa) / oa),
+                                         round((cb * sa + base[i + 2] * fa) / oa),
+                                         round(oa * 255)))
+        return x0, y0, x1, y1
+
+    def push_undo(self):
+        self.undo_stack.append(bytes(self.raster))
+        del self.undo_stack[:-30]
+
+    def undo(self):
+        if self.mode != "draw":
+            return
+        if not self.undo_stack:
+            self.set_status("더 되돌릴 게 없어요.", ok=False)
+            return
+        self.raster[:] = self.undo_stack.pop()
+        self.refresh_board()
+        self.redraw()
+
+    def request_redraw(self):
+        """그리는 중에는 화면/미리보기를 조금씩 모아서 갱신 (버벅임 방지)"""
+        if not self.redraw_job:
+            self.redraw_job = self.root.after(40, self.redraw)
 
     def clear_drawing(self):
         from tkinter import messagebox
 
-        if self.pixels and messagebox.askyesno("전체 지우기", "그린 그림을 모두 지울까요?",
-                                               parent=self.root):
-            self.pixels.clear()
+        if self.has_drawing() and messagebox.askyesno("전체 지우기", "그린 그림을 모두 지울까요?",
+                                                      parent=self.root):
+            self.push_undo()
+            self.raster[:] = bytes(len(self.raster))
             self.refresh_board()
             self.redraw()
 
@@ -766,30 +1070,32 @@ class App:
         """'만들기' 탭의 조준선을 그리기 칸으로 옮겨서 고쳐 그릴 수 있게"""
         from tkinter import messagebox
 
-        if self.pixels and not messagebox.askyesno(
+        if self.has_drawing() and not messagebox.askyesno(
                 "가져오기", "지금 그린 그림을 지우고 '만들기' 조준선을 가져올까요?", parent=self.root):
             return
+        self.push_undo()
         side, rgba = render(self.cfg, 1.0)
         shift = GRID // 2 - side // 2
-        self.pixels.clear()
+        self.raster[:] = bytes(len(self.raster))
         for y in range(side):
             for x in range(side):
                 i = (y * side + x) * 4
                 gx, gy = x + shift, y + shift
                 if rgba[i + 3] and 0 <= gx < GRID and 0 <= gy < GRID:
-                    self.pixels[(gx, gy)] = tuple(rgba[i:i + 4])
+                    raster_set_cell(self.raster, gx, gy, rgba[i:i + 4])
         self.refresh_board()
         self.redraw()
         self.set_status("✔ 가져왔어요. 이제 마음대로 고쳐 그려 보세요.")
 
     def drawing_to_code(self):
         """그린 그림과 가장 비슷한 발로란트 조준선을 찾아서 코드로"""
-        if not self.pixels:
+        pixels = raster_to_pixels(self.raster)
+        if not pixels:
             self.set_status("먼저 그림을 그려 주세요.", ok=False)
             return
         self.set_status("바꾸는 중...")
         self.root.update_idletasks()
-        self.cfg, match = pixels_to_cfg(self.pixels)
+        self.cfg, match = pixels_to_cfg(pixels)
         code = make_code(self.cfg)
         self.code_var.set(code)
         self.load_vars()
@@ -812,15 +1118,18 @@ class App:
     def on_tab(self, _event=None):
         self.mode = "draw" if self.tabs.index("current") == 1 else "make"
         self.redraw()
-        if self.mode == "draw" and not self.pixels:
-            self.set_status("칸을 클릭해서 조준선을 그려 보세요.")
+        if self.mode == "draw" and not self.has_drawing():
+            self.set_status("판에 조준선을 그려 보세요.")
 
     def redraw(self):
         if not hasattr(self, "mode"):
             return  # 아직 창을 만드는 중
+        if self.redraw_job:
+            self.root.after_cancel(self.redraw_job)
+            self.redraw_job = None
         scale = self.scale_var.get()
         if self.mode == "draw":
-            side, rgba = render_pixels(self.pixels, scale)
+            side, rgba = render_raster(self.raster, scale)
         else:
             side, rgba = render(self.cfg, scale)
         if self.overlay:
@@ -836,7 +1145,7 @@ class App:
             "code": make_code(self.cfg),
             "scale": self.scale_var.get(),
             "mode": self.mode,
-            "pixels": {"%d,%d" % p: "%02X%02X%02X%02X" % c for p, c in self.pixels.items()},
+            "drawing": base64.b64encode(zlib.compress(bytes(self.raster))).decode(),
         })
 
     def draw_preview(self, side, rgba):
@@ -935,10 +1244,13 @@ def selftest():
                    if px[i] > 200 and px[i + 1] < 60 and px[i + 2] < 60)
 
     def check(name, expected):
+        check_range(name, expected, expected)
+
+    def check_range(name, lo, hi):
         pump()
         red = red_at_center()
-        print("%s: red pixels at screen center = %s (expected %d)" % (name, red, expected))
-        assert red is None or red == expected, name
+        print("%s: red pixels at screen center = %s (expected %d..%d)" % (name, red, lo, hi))
+        assert red is None or lo <= red <= hi, name
 
     # 1) 만들기: 코드로 빨간 + 모양 (팔 4개 x 10x4 = 160칸)
     app.tabs.select(0)
@@ -952,19 +1264,64 @@ def selftest():
     app.tabs.select(1)
     app.on_tab()
 
-    class Click:
-        def __init__(self, x, y):
-            self.x, self.y = x * app.CELL + 2, y * app.CELL + 2
+    class Mouse:  # 그리기 칸 좌표로 마우스 위치 흉내
+        def __init__(self, x, y, shift=False):
+            self.x, self.y, self.state = x * app.CELL, y * app.CELL, 1 if shift else 0
+
+    def drag(points, erase=False):
+        app.stroke_start(Mouse(*points[0]), erase)
+        for pt in points[1:]:
+            app.stroke_move(Mouse(*pt))
+        app.stroke_end()
+
+    def drawn():
+        return len(raster_to_pixels(app.raster))
 
     mid = GRID // 2
     app.set_brush("FF0000")
     for x in range(mid + 2, mid + 10):
-        app.paint(Click(x, mid), erase=False)
-    assert len(app.pixels) == 64, len(app.pixels)
+        drag([(x + 0.5, mid + 0.5)])
+    assert drawn() == 64, drawn()
     check("draw tab", 64)
-    app.paint(Click(mid + 9, mid), erase=True)  # 끝 칸 지우기 -> 대칭으로 8칸 지워짐
-    assert len(app.pixels) == 56, len(app.pixels)
+    drag([(mid + 9.5, mid + 0.5)], erase=True)  # 끝 칸 지우기 -> 대칭으로 8칸 지워짐
+    assert drawn() == 56, drawn()
     check("draw tab after erase", 56)
+
+    # 부드러운 붓: 대칭 없이 굵기 2 가로선 (칸 6개 x 2줄 + 둥근 끝) -> 되돌리기
+    app.tool_var.set("brush")
+    app.on_tool()
+    app.sym_var.set("1")
+    app.width_var.set(2)
+    drag([(24 + k, 8) for k in range(7)])
+    print("brush stroke cells:", drawn() - 56)
+    assert 12 <= drawn() - 56 <= 16, drawn()
+    check_range("brush stroke", 56 + 12, 56 + 16)
+    app.undo()
+    assert drawn() == 56, drawn()
+
+    # 도형: 채운 사각형 4x3 칸, 테두리 원, Shift 직선 -> 모두 되돌리기
+    app.tool_var.set("rect")
+    app.fill_var.set(True)
+    drag([(26, 4), (28, 6), (30, 7)])
+    assert drawn() - 56 == 12, drawn()
+    check("filled rect", 56 + 12)
+    app.tool_var.set("ellipse")
+    app.fill_var.set(False)
+    app.width_var.set(1)
+    drag([(4, 4), (14, 14)])
+    print("circle cells:", drawn() - 68)
+    assert 20 <= drawn() - 68 <= 40, drawn()
+    app.tool_var.set("line")
+    app.stroke_start(Mouse(4, 30), False)
+    app.stroke_move(Mouse(12, 31, shift=True))  # Shift: 수평으로 맞춤
+    app.stroke_end()
+    print("line cells:", drawn() - 68)
+    for _ in range(3):
+        app.undo()
+    assert drawn() == 56, drawn()
+    app.tool_var.set("pixel")
+    app.on_tool()
+    check("after undo", 56)
 
     # 3) 그림 -> 코드: 그린 + 모양이 똑같은 코드로 바뀌어야 함
     match = app.drawing_to_code()
