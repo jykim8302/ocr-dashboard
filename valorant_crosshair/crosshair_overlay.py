@@ -15,6 +15,7 @@
 
 import ctypes
 import json
+import math
 import os
 import sys
 import time
@@ -36,6 +37,13 @@ DEFAULTS = {
     # 안쪽 선 (0x) / 바깥쪽 선 (1x): b 표시, t 두께, l 길이, v 세로 길이, g 세로 길이 따로, o 간격, a 불투명도
     "0b": 1, "0t": 2, "0l": 6, "0v": 6, "0g": 0, "0o": 3, "0a": 0.8,
     "1b": 1, "1t": 2, "1l": 2, "1v": 2, "1g": 0, "1o": 10, "1a": 0.35,
+}
+
+# 발로란트에서 고를 수 있는 값의 범위 (이상한 코드가 들어와도 이 안으로 맞춤)
+LIMITS = {
+    "t": (1, 6), "o": (0, 1), "z": (1, 6), "a": (0, 1),
+    "0t": (0, 10), "0l": (0, 20), "0v": (0, 20), "0o": (0, 20), "0a": (0, 1),
+    "1t": (0, 10), "1l": (0, 20), "1v": (0, 20), "1o": (0, 40), "1a": (0, 1),
 }
 
 EXAMPLE_CODE = "0;P;c;5;h;0;f;0;0l;4;0o;2;0a;1;0f;0;1b;0"
@@ -77,6 +85,11 @@ def parse_code(code):
     try:
         for key, default in DEFAULTS.items():
             cfg[key] = float(primary.get(key, default))
+            if not math.isfinite(cfg[key]):
+                raise ValueError
+            if key in LIMITS:
+                lo, hi = LIMITS[key]
+                cfg[key] = min(max(cfg[key], lo), hi)
     except ValueError:
         raise ValueError("코드 안에 잘못된 숫자가 있어요.")
 
@@ -886,6 +899,18 @@ def selftest():
         cfg = parse_code(code)
         assert parse_code(make_code(cfg)) == cfg, (code, make_code(cfg))
     print("code round trip: OK")
+
+    # 이상한 숫자: 오류 메시지로 거절하거나 발로란트 범위로 맞추기 (멈추거나 너무 커지면 안 됨)
+    for code in ["0;P;0o;inf", "0;P;0o;nan", "0;P;0l;-inf"]:
+        try:
+            parse_code(code)
+            raise AssertionError(code + " should be rejected")
+        except ValueError:
+            pass
+    for code in ["0;P;0l;1e9", "0;P;0o;1e3;1o;1e3;0t;-5", "0;P;t;99;z;99;0a;5"]:
+        side, _ = render(parse_code(code), 3.0)
+        assert side <= 400, (code, side)
+    print("bad numbers: OK")
 
     root = tk.Tk()
     app = App(root)
