@@ -96,8 +96,11 @@ for 키 in ["*LCtrl", "*RCtrl", "*LCtrl up", "*RCtrl up"]
     Hotkey 키, Ctrl막기, "Off"
 
 Ctrl막기켜기(켜기) {
+    ; 단축키 안에서 Hotkey 를 쓰면 그 단축키의 조건(#HotIf)을 따라가서 오류가 남
+    ; → 조건 없음으로 되돌린 뒤 켜고 끄기. 혹시 실패해도 E 연타는 멈추지 않게 try
+    HotIf
     for 키 in ["*LCtrl", "*RCtrl", "*LCtrl up", "*RCtrl up"]
-        Hotkey 키, 켜기 ? "On" : "Off"
+        try Hotkey 키, 켜기 ? "On" : "Off"
 }
 
 #HotIf 켜짐 && !WinActive("ahk_id " 창.Hwnd)   ; 상태 창 클릭할 땐 연타 안 함
