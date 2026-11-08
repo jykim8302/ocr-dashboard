@@ -89,45 +89,17 @@ OnExit 종료정리
 $F12::전환()
 $^F12::ExitApp
 
-; 연타하는 동안 Ctrl 을 막아 두는 단축키 (평소엔 꺼져 있음)
-;  - 키보드는 Ctrl 을 누르고 있으면 계속 "Ctrl 눌림" 신호를 보내서, 막지 않으면 Ctrl 이 다시 눌림
-Ctrl막기(*) => 0
-for 키 in ["*LCtrl", "*RCtrl", "*LCtrl up", "*RCtrl up"]
-    Hotkey 키, Ctrl막기, "Off"
-
-Ctrl막기켜기(켜기) {
-    ; 단축키 안에서 Hotkey 를 쓰면 그 단축키의 조건(#HotIf)을 따라가서 오류가 남
-    ; → 조건 없음으로 되돌린 뒤 켜고 끄기. 혹시 실패해도 E 연타는 멈추지 않게 try
-    HotIf
-    for 키 in ["*LCtrl", "*RCtrl", "*LCtrl up", "*RCtrl up"]
-        try Hotkey 키, 켜기 ? "On" : "Off"
-}
-
 #HotIf 켜짐 && !WinActive("ahk_id " 창.Hwnd)   ; 상태 창 클릭할 땐 연타 안 함
 *~LButton:: {                  ; * : Ctrl/Shift/Alt 를 누르고 있어도 작동, ~ : 원래 좌클릭도 그대로 동작
-    ; Ctrl 을 누르고 있으면: 연타 시작할 때 Ctrl 을 한 번만 떼고, 끝나면 한 번만 다시 누름
-    ; → 연타 중에는 게임에 Ctrl 없이 E 만 들어감 (Ctrl 이 풀렸다 눌렸다 반복하지 않음)
-    Ctrl막기켜기(true)
-    if GetKeyState("LCtrl")
-        SendInput "{Blind}{LCtrl up}"
-    if GetKeyState("RCtrl")
-        SendInput "{Blind}{RCtrl up}"
-
     ; 눌렀다 → 잠깐 대기 → 뗐다 → 잠깐 대기
     ; (대기 없이 보내면 입력이 밀려서 렉이 걸리고, 손을 떼도 한동안 눌림)
-    ; vk45 : 한/영 상태와 상관없이 E 키 그대로 입력
+    ; {Blind} : Ctrl/Shift/Alt 를 누르고 있으면 그대로 계속 누른 상태 유지 (떼지 않음)
+    ; vk45    : 한/영 상태와 상관없이 E 키 그대로 입력
     while 켜짐 && GetKeyState("LButton", "P") {
         SendInput "{Blind}{vk45 down}"
         정밀대기(간격)
         SendInput "{Blind}{vk45 up}"
         정밀대기(간격)
     }
-
-    ; 연타가 끝났는데 Ctrl 을 아직 누르고 있으면 다시 누른 상태로 돌려놓기
-    Ctrl막기켜기(false)
-    if GetKeyState("LCtrl", "P")
-        SendInput "{Blind}{LCtrl down}"
-    if GetKeyState("RCtrl", "P")
-        SendInput "{Blind}{RCtrl down}"
 }
 #HotIf
