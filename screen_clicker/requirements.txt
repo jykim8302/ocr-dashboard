@@ -1,0 +1,14 @@
+numpy>=1.20.0
+opencv-python>=4.5.0
+pillow>=8.0.0
+mss>=9.0.0
+pyautogui>=0.9.54
+pynput>=1.7.6
+# 글자 인식: Windows에 들어있는 기능을 쓰기 위한 연결 모듈 (Windows에서만 설치됨)
+winrt-runtime; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Foundation; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Foundation.Collections; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Globalization; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Graphics.Imaging; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Media.Ocr; sys_platform == "win32" and python_version >= "3.11"
+winrt-Windows.Storage.Streams; sys_platform == "win32" and python_version >= "3.11"
