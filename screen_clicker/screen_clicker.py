@@ -171,7 +171,19 @@ def load_settings():
 
 
 def save_settings(data):
-    SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 임시 파일에 먼저 쓰고 바꿔치기 → 저장 중 꺼져도 설정이 깨지지 않음
+    tmp = SETTINGS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(SETTINGS_FILE)
+
+
+def next_name(rules):
+    """아직 안 쓴 가장 작은 번호 → '1번', '2번', '3번' ..."""
+    used = {r["name"] for r in rules}
+    n = 1
+    while f"{n}번" in used:
+        n += 1
+    return f"{n}번"
 
 
 # ============================================================
@@ -372,12 +384,32 @@ class RuleDialog(tk.Toplevel):
 
         # ① 감시 박스
         ttk.Label(frm, text="① 감시할 박스", font=("Malgun Gothic", 10, "bold")).grid(row=1, column=0, sticky="w", **pad)
-        self.region_var = tk.StringVar()
-        ttk.Label(frm, textvariable=self.region_var, foreground="#2563EB").grid(row=1, column=1, sticky="w", **pad)
+        reg_box = ttk.Frame(frm)
+        reg_box.grid(row=1, column=1, sticky="w", **pad)
+        self.reg_vars = []
+        for i, t in enumerate(("X", "Y", "폭", "높이")):
+            ttk.Label(reg_box, text=t).grid(row=0, column=i * 2, padx=(0 if i == 0 else 6, 2))
+            v = tk.IntVar(value=0)
+            ttk.Spinbox(reg_box, from_=-20000, to=20000, textvariable=v, width=5).grid(row=0, column=i * 2 + 1)
+            self.reg_vars.append(v)
         ttk.Button(frm, text="📐 화면에서 박스 그리기", command=self.pick_region).grid(row=1, column=2, sticky="we", **pad)
 
+        # 다른 번호에 저장된 박스/사진 가져오기
+        others = [r for r in app.data["rules"] if r["id"] != rule["id"]]
+        self.others = {r["name"]: r for r in others}
+        if others:
+            imp = ttk.Frame(frm)
+            imp.grid(row=10, column=0, columnspan=3, sticky="we", padx=10, pady=(0, 4))
+            ttk.Label(imp, text="📋 저장된 것 가져오기:").pack(side="left")
+            self.import_var = tk.StringVar()
+            ttk.Combobox(imp, textvariable=self.import_var, values=list(self.others), state="readonly",
+                         width=12).pack(side="left", padx=6)
+            ttk.Button(imp, text="박스만", command=lambda: self.import_from("region")).pack(side="left")
+            ttk.Button(imp, text="사진만", command=lambda: self.import_from("image")).pack(side="left", padx=4)
+            ttk.Button(imp, text="둘 다", command=lambda: self.import_from("both")).pack(side="left")
+
         # ② 찾을 그림
-        ttk.Label(frm, text="② 찾을 그림", font=("Malgun Gothic", 10, "bold")).grid(row=2, column=0, sticky="nw", **pad)
+        ttk.Label(frm, text="② 찾을 사진", font=("Malgun Gothic", 10, "bold")).grid(row=2, column=0, sticky="nw", **pad)
         self.preview = tk.Label(frm, text="(아직 없음)", width=28, height=6, relief="groove", bg="#F3F4F6")
         self.preview.grid(row=2, column=1, rowspan=2, sticky="w", **pad)
         ttk.Button(frm, text="✂ 화면에서 캡처", command=self.capture_image).grid(row=2, column=2, sticky="we", **pad)
@@ -414,19 +446,48 @@ class RuleDialog(tk.Toplevel):
         ttk.Separator(frm).grid(row=8, column=0, columnspan=3, sticky="we", pady=8)
 
         btns = ttk.Frame(frm)
-        btns.grid(row=9, column=0, columnspan=3, sticky="we")
+        btns.grid(row=11, column=0, columnspan=3, sticky="we", pady=(6, 0))
         ttk.Button(btns, text="🔍 지금 찾아보기(테스트)", command=self.test).pack(side="left")
         ttk.Button(btns, text="취소", command=self.destroy).pack(side="right")
         ttk.Button(btns, text="💾 저장", command=self.save).pack(side="right", padx=6)
 
+        self.set_region(rule["region"])
         self.refresh()
         self.grab_set()
         self.bind("<Escape>", lambda e: self.destroy())
 
     # ---- 화면 갱신
+    def get_region(self):
+        try:
+            x, y, w, h = (int(v.get()) for v in self.reg_vars)
+        except Exception:
+            return None
+        return [x, y, w, h] if w > 0 and h > 0 else None
+
+    def set_region(self, r):
+        for v, n in zip(self.reg_vars, r or (0, 0, 0, 0)):
+            v.set(int(n))
+
+    def import_from(self, what):
+        src = self.others.get(self.import_var.get())
+        if not src:
+            messagebox.showinfo("알림", "가져올 번호를 먼저 골라주세요.", parent=self)
+            return
+        if what in ("region", "both"):
+            if src["region"]:
+                self.set_region(src["region"])
+            else:
+                messagebox.showinfo("알림", f"'{src['name']}'에는 박스가 없어요.", parent=self)
+        if what in ("image", "both"):
+            img = read_image(IMAGE_DIR / src["image"]) if src["image"] else None
+            if img is not None:
+                self.template = img
+                self.new_image = True
+                self.refresh()
+            else:
+                messagebox.showinfo("알림", f"'{src['name']}'에는 사진이 없어요.", parent=self)
+
     def refresh(self):
-        r = self.rule["region"]
-        self.region_var.set(f"위치 {r[0]}, {r[1]}  /  크기 {r[2]} × {r[3]}" if r else "(아직 안 정함)")
         if self.template is not None:
             self.photo = to_photo(self.template, 200, 90)
             self.preview.config(image=self.photo, text="", width=200, height=90)
@@ -440,22 +501,21 @@ class RuleDialog(tk.Toplevel):
         self.grab_set()
         if res:
             x, y, w, h, crop = res
-            self.rule["region"] = [int(x), int(y), int(w), int(h)]
-            self.refresh()
+            self.set_region([x, y, w, h])
 
     def capture_image(self):
         res = select_on_screen(self.app.root, [self, self.app.root],
                                "② 찾을 그림(버튼 등)만 딱 맞게 드래그하세요",
-                               hint_region=self.rule["region"])
+                               hint_region=self.get_region())
         self.grab_set()
         if res:
             x, y, w, h, crop = res
             self.template = crop
             self.new_image = True
-            if not self.rule["region"]:
+            if not self.get_region():
                 # 박스를 안 정했으면 그림 주변을 넉넉하게 박스로 잡아줌
                 m = 40
-                self.rule["region"] = [int(x - m), int(y - m), int(w + 2 * m), int(h + 2 * m)]
+                self.set_region([x - m, y - m, w + 2 * m, h + 2 * m])
             self.refresh()
 
     def upload_image(self):
@@ -473,10 +533,10 @@ class RuleDialog(tk.Toplevel):
         self.refresh()
 
     def test(self):
-        if not self.rule["region"] or self.template is None:
+        if not self.get_region() or self.template is None:
             messagebox.showinfo("알림", "① 박스와 ② 그림을 먼저 정해주세요.", parent=self)
             return
-        x, y, w, h = self.rule["region"]
+        x, y, w, h = self.get_region()
         self.withdraw()
         self.app.root.withdraw()
         self.app.root.update()
@@ -514,18 +574,18 @@ class RuleDialog(tk.Toplevel):
         win.grab_set()
 
     def save(self):
-        if not self.rule["region"]:
-            messagebox.showinfo("알림", "① 감시할 박스를 정해주세요.", parent=self)
+        region = self.get_region()
+        if not region and self.template is None:
+            messagebox.showinfo("알림", "① 박스나 ② 사진 중 하나는 정해주세요.", parent=self)
             return
-        if self.template is None:
-            messagebox.showinfo("알림", "② 찾을 그림을 캡처하거나 올려주세요.", parent=self)
-            return
-        x, y, w, h = self.rule["region"]
-        th_px, tw = self.template.shape[:2]
-        if tw > w or th_px > h:
-            if not messagebox.askyesno("확인", "그림이 박스보다 커서 찾을 수 없어요.\n그래도 저장할까요?", parent=self):
-                return
-        name = self.name_var.get().strip() or f"항목 {len(self.app.data['rules']) + 1}"
+        if region and self.template is not None:
+            th_px, tw = self.template.shape[:2]
+            if tw > region[2] or th_px > region[3]:
+                if not messagebox.askyesno("확인", "사진이 박스보다 커서 찾을 수 없어요.\n그래도 저장할까요?", parent=self):
+                    return
+        others = [r for r in self.app.data["rules"] if r["id"] != self.rule["id"]]
+        name = self.name_var.get().strip() or next_name(others)
+        self.rule["region"] = region
         self.rule["name"] = name
         self.rule["threshold"] = self.th_var.get() / 100
         self.rule["click"] = CLICK_TYPES.get(self.click_var.get(), "left")
@@ -552,15 +612,16 @@ class App:
         self.watcher = None
         self.q = queue.Queue()
         self.status = {}
+        self.thumbs = {}  # 목록에 보이는 작은 사진들
 
         root.title("화면 이미지 자동 클릭기")
-        root.geometry("760x520")
+        root.geometry("860x560")
         root.minsize(640, 420)
         try:
             style = ttk.Style()
             if "vista" in style.theme_names():
                 style.theme_use("vista")
-            style.configure("Treeview", rowheight=28, font=("Malgun Gothic", 10))
+            style.configure("Treeview", rowheight=46, font=("Malgun Gothic", 10))
             style.configure("Treeview.Heading", font=("Malgun Gothic", 10, "bold"))
             style.configure("Big.TButton", font=("Malgun Gothic", 11, "bold"), padding=8)
         except Exception:
@@ -571,15 +632,19 @@ class App:
         top.pack(fill="x")
         ttk.Button(top, text="➕ 새 항목", command=self.add).pack(side="left")
         ttk.Button(top, text="✏ 고치기", command=self.edit).pack(side="left", padx=4)
-        ttk.Button(top, text="📄 복사", command=self.copy).pack(side="left")
-        ttk.Button(top, text="🗑 지우기", command=self.delete).pack(side="left", padx=4)
-        ttk.Label(top, text="체크칸 클릭 = 켜기/끄기 · 두 번 클릭 = 고치기", foreground="gray").pack(side="right")
+        ttk.Button(top, text="🏷 이름 바꾸기 (F2)", command=self.rename).pack(side="left")
+        ttk.Button(top, text="📄 복사", command=self.copy).pack(side="left", padx=4)
+        ttk.Button(top, text="🗑 지우기", command=self.delete).pack(side="left")
+        ttk.Label(top, text="이름 두 번 클릭 = 이름 바꾸기 · 다른 칸 두 번 클릭 = 고치기",
+                  foreground="gray").pack(side="right")
 
         # 목록
         mid = ttk.Frame(root, padding=(10, 4))
         mid.pack(fill="both", expand=True)
         cols = ("on", "name", "region", "th", "click", "status")
-        self.tree = ttk.Treeview(mid, columns=cols, show="headings", selectmode="browse")
+        self.tree = ttk.Treeview(mid, columns=cols, show="tree headings", selectmode="browse")
+        self.tree.heading("#0", text="사진")
+        self.tree.column("#0", width=100, stretch=False, anchor="center")
         for c, t, w, a in [("on", "사용", 50, "center"), ("name", "이름", 140, "w"),
                            ("region", "박스 위치", 150, "w"), ("th", "정확도", 60, "center"),
                            ("click", "클릭", 80, "center"), ("status", "상태", 220, "w")]:
@@ -589,7 +654,8 @@ class App:
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
-        self.tree.bind("<Double-1>", lambda e: self.edit())
+        self.tree.bind("<Double-1>", self.on_tree_double)
+        self.tree.bind("<F2>", lambda e: self.rename())
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<Delete>", lambda e: self.delete())
 
@@ -648,16 +714,84 @@ class App:
         self.tree.delete(*self.tree.get_children())
         for r in self.data["rules"]:
             reg = r["region"]
-            self.tree.insert("", "end", iid=r["id"], values=(
+            thumb = self.make_thumb(r)
+            status = self.status.get(r["id"], "")
+            if not reg and not r["image"]:
+                status = "⚠ 박스·사진 없음"
+            elif not reg:
+                status = "⚠ 박스 없음 (고치기에서 정하세요)"
+            elif not r["image"]:
+                status = "⚠ 사진 없음 (고치기에서 정하세요)"
+            self.tree.insert("", "end", iid=r["id"], image=thumb or "", text="" if thumb else "(없음)", values=(
                 "☑" if r["enabled"] else "☐",
                 r["name"],
                 f"{reg[0]},{reg[1]} ({reg[2]}×{reg[3]})" if reg else "-",
                 f"{r['threshold']:.0%}",
                 CLICK_NAMES.get(r["click"], ""),
-                self.status.get(r["id"], ""),
+                status,
             ))
         if sel and self.tree.exists(sel):
             self.tree.selection_set(sel)
+
+    def make_thumb(self, r):
+        """목록용 작은 사진 (파일이 바뀌었을 때만 새로 만듦)"""
+        if not r["image"]:
+            return None
+        key = (r["id"], r["image"])
+        if key not in self.thumbs:
+            img = read_image(IMAGE_DIR / r["image"])
+            self.thumbs[key] = to_photo(img, 90, 40) if img is not None else None
+        return self.thumbs[key]
+
+    def on_tree_double(self, e):
+        rid = self.tree.identify_row(e.y)
+        if not rid:
+            return
+        self.tree.selection_set(rid)
+        if self.tree.identify_column(e.x) == "#2":  # 이름 칸
+            self.rename()
+        elif self.tree.identify_column(e.x) != "#1":
+            self.edit()
+        return "break"
+
+    def rename(self):
+        """목록에서 바로 이름 바꾸기 (Enter = 저장, Esc = 취소)"""
+        rid = self.selected_id()
+        r = self.find_rule(rid)
+        if not r:
+            messagebox.showinfo("알림", "이름을 바꿀 항목을 먼저 골라주세요.")
+            return
+        self.tree.see(rid)
+        self.tree.update_idletasks()
+        box = self.tree.bbox(rid, "name")
+        if not box:
+            return
+        x, y, w, h = box
+        var = tk.StringVar(value=r["name"])
+        ent = ttk.Entry(self.tree, textvariable=var, font=("Malgun Gothic", 10))
+        ent.place(x=x, y=y + (h - 28) // 2, width=max(w, 140), height=28)
+        ent.focus_set()
+        ent.select_range(0, "end")
+        done = {"v": False}
+
+        def finish(save):
+            if done["v"]:
+                return
+            done["v"] = True
+            new = var.get().strip()
+            ent.destroy()
+            if save and new and new != r["name"]:
+                if any(o["name"] == new for o in self.data["rules"] if o is not r):
+                    messagebox.showwarning("알림", f"'{new}' 이름은 이미 있어요. 다른 이름을 써주세요.")
+                    return
+                self.log(f"이름 변경: '{r['name']}' → '{new}' (저장됨)")
+                r["name"] = new
+                self.changed()
+
+        ent.bind("<Return>", lambda e: finish(True))
+        ent.bind("<KP_Enter>", lambda e: finish(True))
+        ent.bind("<Escape>", lambda e: finish(False))
+        ent.bind("<FocusOut>", lambda e: finish(True))
 
     def selected_id(self):
         s = self.tree.selection()
@@ -683,13 +817,15 @@ class App:
 
     # ---- 항목 버튼
     def add(self):
-        dlg = RuleDialog(self, new_rule())
+        rule = new_rule()
+        rule["name"] = next_name(self.data["rules"])
+        dlg = RuleDialog(self, rule)
         self.root.wait_window(dlg)
         if dlg.saved:
             self.data["rules"].append(dlg.rule)
             self.changed()
             self.tree.selection_set(dlg.rule["id"])
-            self.log(f"'{dlg.rule['name']}' 항목을 만들었어요.")
+            self.log(f"💾 '{dlg.rule['name']}' 저장했어요. (박스 위치 + 사진)")
 
     def edit(self):
         r = self.find_rule(self.selected_id())
@@ -704,6 +840,7 @@ class App:
             if dlg.new_image and old_img and old_img != r["image"]:
                 (IMAGE_DIR / old_img).unlink(missing_ok=True)
             self.changed()
+            self.log(f"💾 '{r['name']}' 저장했어요.")
 
     def copy(self):
         r = self.find_rule(self.selected_id())
@@ -712,7 +849,7 @@ class App:
             return
         c = dict(r)
         c["id"] = uuid.uuid4().hex[:8]
-        c["name"] = r["name"] + " (복사)"
+        c["name"] = next_name(self.data["rules"])
         if r["image"]:
             img = read_image(IMAGE_DIR / r["image"])
             if img is not None:
